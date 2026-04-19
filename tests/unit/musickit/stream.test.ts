@@ -13,6 +13,11 @@ vi.mock('../../../src/session')
 
 import { StreamResolver } from '../../../src/stream'
 import { DiscoveryClient } from '../../../src/discovery'
+import { RetryEngine } from '../../../src/retry'
+
+;(RetryEngine as any).mockImplementation(() => ({
+  execute: vi.fn().mockImplementation((fn: Function) => fn()),
+}))
 
 const mockStream = { resolve: vi.fn() }
 const mockDiscovery = { search: vi.fn() }

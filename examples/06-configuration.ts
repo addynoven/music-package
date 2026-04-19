@@ -5,7 +5,7 @@
  * Override only what you need.
  */
 
-import { MusicKit } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
 
 // --- Zero config (recommended starting point) ---
 

@@ -7,8 +7,8 @@
  *   Album   → 1 hour
  */
 
-import { MusicKit } from 'musickit'
-import type { Section, Artist, Album, Song } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
+import type { Section, Artist, Album, Song } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 

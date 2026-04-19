@@ -12,6 +12,11 @@ vi.mock('../../../src/retry')
 vi.mock('../../../src/session')
 
 import { DiscoveryClient } from '../../../src/discovery'
+import { RetryEngine } from '../../../src/retry'
+
+;(RetryEngine as any).mockImplementation(() => ({
+  execute: vi.fn().mockImplementation((fn: Function) => fn()),
+}))
 
 const mockDiscovery = {
   autocomplete: vi.fn(),

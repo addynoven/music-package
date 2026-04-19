@@ -5,8 +5,8 @@
  * MusicKit caches it automatically and re-fetches before it expires.
  */
 
-import { MusicKit } from 'musickit'
-import type { StreamingData, AudioTrack } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
+import type { StreamingData, AudioTrack } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 

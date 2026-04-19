@@ -8,7 +8,7 @@
  * Example:     Bohemian Rhapsody (Queen).opus
  */
 
-import { MusicKit } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 

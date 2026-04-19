@@ -2,8 +2,8 @@
  * Search & Autocomplete — all search options and filter types.
  */
 
-import { MusicKit, SearchFilter } from 'musickit'
-import type { Song, Album, Artist, Playlist, SearchResults } from 'musickit'
+import { MusicKit, SearchFilter } from 'musicstream-sdk'
+import type { Song, Album, Artist, Playlist, SearchResults } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 

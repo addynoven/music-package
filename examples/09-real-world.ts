@@ -2,8 +2,8 @@
  * Real-world patterns — how MusicKit fits into actual applications.
  */
 
-import { MusicKit } from 'musickit'
-import type { Song, AudioTrack } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
+import type { Song, AudioTrack } from 'musicstream-sdk'
 
 // ─────────────────────────────────────────────
 // Pattern 1: CLI music player

@@ -28,6 +28,7 @@ export interface Artist {
   type: 'artist'
   channelId: string
   name: string
+  subscribers?: string
   thumbnails: Thumbnail[]
   songs: Song[]
   albums: Album[]
@@ -66,6 +67,9 @@ export interface SearchResults {
   playlists: Playlist[]
 }
 
+// MediaItem — union of all playable/browsable content types
+export type MediaItem = Song | Album | Artist | Playlist
+
 export const SearchFilter = {
   Songs: 'songs',
   Albums: 'albums',
@@ -75,7 +79,29 @@ export const SearchFilter = {
 export type SearchFilter = typeof SearchFilter[keyof typeof SearchFilter]
 
 export type Quality = 'high' | 'low'
+export type StreamQuality = Quality
+
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug'
+
+export type DownloadFormat = 'opus' | 'm4a'
+
+export interface SearchOptions {
+  filter?: SearchFilter
+}
+
+export interface StreamOptions {
+  quality?: Quality
+}
+
+export interface DownloadOptions {
+  path?: string
+  format?: DownloadFormat
+  onProgress?: (percent: number) => void
+}
+
+export interface BrowseOptions {
+  country?: string
+}
 
 export interface RateLimitConfig {
   search?: number
@@ -84,15 +110,17 @@ export interface RateLimitConfig {
   autocomplete?: number
 }
 
+export interface CacheTTLConfig {
+  stream?: number
+  search?: number
+  home?: number
+  artist?: number
+}
+
 export interface CacheConfig {
   dir?: string
   enabled?: boolean
-  ttl?: {
-    stream?: number
-    search?: number
-    home?: number
-    artist?: number
-  }
+  ttl?: CacheTTLConfig
 }
 
 export interface MusicKitConfig {
@@ -109,3 +137,41 @@ export interface MusicKitConfig {
   backoffBase?: number
   backoffMax?: number
 }
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+export interface MusicKitRequest {
+  method: string
+  endpoint: string
+  headers: Record<string, string>
+  body: unknown
+}
+
+export const MusicKitErrorCode = {
+  RateLimited: 'RATE_LIMITED',
+  Forbidden: 'FORBIDDEN',
+  VideoUnavailable: 'VIDEO_UNAVAILABLE',
+  VideoUnplayable: 'VIDEO_UNPLAYABLE',
+  CipherFailure: 'CIPHER_FAILURE',
+  NetworkError: 'NETWORK_ERROR',
+  ParseError: 'PARSE_ERROR',
+  DownloadError: 'DOWNLOAD_ERROR',
+  Unknown: 'UNKNOWN',
+} as const
+export type MusicKitErrorCode = typeof MusicKitErrorCode[keyof typeof MusicKitErrorCode]
+
+export interface MusicKitError extends Error {
+  code: MusicKitErrorCode
+  endpoint?: string
+  statusCode?: number
+}
+
+export type MusicKitEvent =
+  | 'beforeRequest'
+  | 'afterRequest'
+  | 'cacheHit'
+  | 'cacheMiss'
+  | 'rateLimited'
+  | 'visitorIdRefreshed'
+  | 'retry'
+  | 'error'

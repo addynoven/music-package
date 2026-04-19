@@ -77,8 +77,9 @@ var RateLimiter = class {
       autocomplete: limits.autocomplete ?? 30
     };
   }
-  async throttle(endpoint) {
-    await this.enforceMinGap();
+  async throttle(endpoint, onLimited) {
+    const waited = await this.enforceMinGap();
+    if (waited > 0) onLimited?.(endpoint, waited);
     this.consumeToken(endpoint);
   }
   getWaitTime(endpoint) {
@@ -89,8 +90,13 @@ var RateLimiter = class {
   }
   async enforceMinGap() {
     const wait = this.lastRequestAt + this.minGapMs - Date.now();
-    if (wait > 0) await delay(wait);
+    if (wait > 0) {
+      await delay(wait);
+      this.lastRequestAt = Date.now();
+      return wait;
+    }
     this.lastRequestAt = Date.now();
+    return 0;
   }
   consumeToken(endpoint) {
     const bucket = this.getBucket(endpoint);
@@ -163,6 +169,7 @@ var RetryEngine = class {
           this.config.backoffMax
         );
         this.config.onRetry(attempt, delayMs);
+        options.onRetry?.(_endpoint, attempt, err.message);
         await delay2(delayMs);
       }
     }
@@ -570,6 +577,9 @@ var MusicKitEmitter = class {
 };
 
 // src/musickit/index.ts
+function makeReq(endpoint) {
+  return { method: "GET", endpoint, headers: {}, body: null };
+}
 var MusicKit = class _MusicKit {
   constructor(config = {}, _yt) {
     this.searchCache = /* @__PURE__ */ new Map();
@@ -583,16 +593,18 @@ var MusicKit = class _MusicKit {
       path: cacheConfig.dir
     });
     this.limiter = new RateLimiter(config.rateLimit ?? {}, config.minRequestGap ?? 100);
+    this.emitter = new MusicKitEmitter();
     this.retry = new RetryEngine({
       maxAttempts: config.maxRetries ?? 3,
       backoffBase: config.backoffBase ?? 1e3,
-      backoffMax: config.backoffMax
+      backoffMax: config.backoffMax,
+      onRetry: () => {
+      }
     });
     this.session = new SessionManager(this.cache, {
       visitorId: config.visitorId,
       userAgent: config.userAgent
     });
-    this.emitter = new MusicKitEmitter();
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
       this._stream = new StreamResolver(this.cache, _yt);
@@ -613,6 +625,22 @@ var MusicKit = class _MusicKit {
     this._stream = new StreamResolver(this.cache, yt);
     this._downloader = new Downloader(this._stream);
   }
+  async call(endpoint, fn) {
+    const req = makeReq(endpoint);
+    const start = Date.now();
+    this.emitter.emit("beforeRequest", req);
+    try {
+      const result = await this.retry.execute(fn, endpoint, {
+        onRateLimited: (waitMs) => this.emitter.emit("rateLimited", endpoint, waitMs),
+        onRetry: (ep, attempt, reason) => this.emitter.emit("retry", ep, attempt, reason)
+      });
+      this.emitter.emit("afterRequest", req, Date.now() - start, 200);
+      return result;
+    } catch (err) {
+      this.emitter.emit("error", err);
+      throw err;
+    }
+  }
   on(event, handler) {
     this.emitter.on(event, handler);
   }
@@ -621,7 +649,7 @@ var MusicKit = class _MusicKit {
   }
   async autocomplete(query) {
     await this.ensureClients();
-    return this._discovery.autocomplete(query);
+    return this.call("autocomplete", () => this._discovery.autocomplete(query));
   }
   async search(query, options) {
     const cacheKey = `search:${query}:${options?.filter ?? "all"}`;
@@ -637,32 +665,22 @@ var MusicKit = class _MusicKit {
       return persisted;
     }
     this.emitter.emit("cacheMiss", cacheKey);
-    try {
-      await this.limiter.throttle("search");
-      await this.ensureClients();
-      const result = await this._discovery.search(query, options ?? {});
-      this.searchCache.set(cacheKey, result);
-      this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
-      return result;
-    } catch (err) {
-      this.emitter.emit("error", err);
-      throw err;
-    }
+    await this.limiter.throttle("search", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call("search", () => this._discovery.search(query, options ?? {}));
+    this.searchCache.set(cacheKey, result);
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+    return result;
   }
   async getStream(videoId, options) {
-    try {
-      await this.ensureClients();
-      return await this._stream.resolve(videoId, options?.quality ?? "high");
-    } catch (err) {
-      this.emitter.emit("error", err);
-      throw err;
-    }
+    await this.ensureClients();
+    return this.call("stream", () => this._stream.resolve(videoId, options?.quality ?? "high"));
   }
   async getTrack(videoId) {
     await this.ensureClients();
     const [songs, streamData] = await Promise.all([
-      this._discovery.search(videoId, { filter: "songs" }),
-      this._stream.resolve(videoId, "high")
+      this.call("search", () => this._discovery.search(videoId, { filter: "songs" })),
+      this.call("stream", () => this._stream.resolve(videoId, "high"))
     ]);
     const song = Array.isArray(songs) ? songs[0] : void 0;
     if (!song) throw new Error(`Track not found: ${videoId}`);
@@ -670,27 +688,27 @@ var MusicKit = class _MusicKit {
   }
   async getHome() {
     await this.ensureClients();
-    return this._discovery.getHome();
+    return this.call("browse", () => this._discovery.getHome());
   }
   async getArtist(channelId) {
     await this.ensureClients();
-    return this._discovery.getArtist(channelId);
+    return this.call("browse", () => this._discovery.getArtist(channelId));
   }
   async getAlbum(browseId) {
     await this.ensureClients();
-    return this._discovery.getAlbum(browseId);
+    return this.call("browse", () => this._discovery.getAlbum(browseId));
   }
   async getRadio(videoId) {
     await this.ensureClients();
-    return this._discovery.getRadio(videoId);
+    return this.call("browse", () => this._discovery.getRadio(videoId));
   }
   async getRelated(videoId) {
     await this.ensureClients();
-    return this._discovery.getRelated(videoId);
+    return this.call("browse", () => this._discovery.getRelated(videoId));
   }
   async getCharts(options) {
     await this.ensureClients();
-    return this._discovery.getCharts(options);
+    return this.call("browse", () => this._discovery.getCharts(options));
   }
   async download(videoId, options) {
     await this.ensureClients();
@@ -705,6 +723,17 @@ var SearchFilter = {
   Artists: "artists",
   Playlists: "playlists"
 };
+var MusicKitErrorCode = {
+  RateLimited: "RATE_LIMITED",
+  Forbidden: "FORBIDDEN",
+  VideoUnavailable: "VIDEO_UNAVAILABLE",
+  VideoUnplayable: "VIDEO_UNPLAYABLE",
+  CipherFailure: "CIPHER_FAILURE",
+  NetworkError: "NETWORK_ERROR",
+  ParseError: "PARSE_ERROR",
+  DownloadError: "DOWNLOAD_ERROR",
+  Unknown: "UNKNOWN"
+};
 export {
   Cache,
   DiscoveryClient,
@@ -712,6 +741,7 @@ export {
   HttpError,
   MusicKit,
   MusicKitEmitter,
+  MusicKitErrorCode,
   RateLimiter,
   RetryEngine,
   SearchFilter,

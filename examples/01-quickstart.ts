@@ -3,7 +3,7 @@
  * Copy this to get up and running in under a minute.
  */
 
-import { MusicKit } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 

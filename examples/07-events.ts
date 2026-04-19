@@ -8,8 +8,8 @@
  *   - Debugging the anti-ban layer
  */
 
-import { MusicKit } from 'musickit'
-import type { MusicKitRequest, MusicKitError, MusicKitErrorCode } from 'musickit'
+import { MusicKit } from 'musicstream-sdk'
+import type { MusicKitRequest, MusicKitError, MusicKitErrorCode } from 'musicstream-sdk'
 
 const mk = new MusicKit({ logLevel: "silent" }) // silence built-in logs, use our own
 

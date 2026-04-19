@@ -13,6 +13,7 @@ export class HttpError extends Error {
 interface RetryOptions {
   onRateLimited?: (waitMs: number) => void
   onForbidden?: () => Promise<void>
+  onRetry?: (endpoint: string, attempt: number, reason: string) => void
 }
 
 interface RetryEngineConfig {
@@ -72,6 +73,7 @@ export class RetryEngine {
           this.config.backoffMax,
         )
         this.config.onRetry(attempt, delayMs)
+        options.onRetry?.(_endpoint, attempt, (err as Error).message)
         await delay(delayMs)
       }
     }

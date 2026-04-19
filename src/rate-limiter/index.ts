@@ -24,8 +24,9 @@ export class RateLimiter {
     }
   }
 
-  async throttle(endpoint: string): Promise<void> {
-    await this.enforceMinGap()
+  async throttle(endpoint: string, onLimited?: (endpoint: string, waitMs: number) => void): Promise<void> {
+    const waited = await this.enforceMinGap()
+    if (waited > 0) onLimited?.(endpoint, waited)
     this.consumeToken(endpoint)
   }
 
@@ -36,10 +37,15 @@ export class RateLimiter {
     return bucket.windowStart + WINDOW_MS - Date.now()
   }
 
-  private async enforceMinGap(): Promise<void> {
+  private async enforceMinGap(): Promise<number> {
     const wait = this.lastRequestAt + this.minGapMs - Date.now()
-    if (wait > 0) await delay(wait)
+    if (wait > 0) {
+      await delay(wait)
+      this.lastRequestAt = Date.now()
+      return wait
+    }
     this.lastRequestAt = Date.now()
+    return 0
   }
 
   private consumeToken(endpoint: string): void {

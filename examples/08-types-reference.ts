@@ -10,21 +10,21 @@
 
 import type {
   // --- Core data models ---
-  MediaItem,      // base type for any playable item
-  Song,           // MediaItem with type: "song"
-  Album,          // album with browse ID and optional tracks
-  Artist,         // artist page with songs, albums, singles
-  Playlist,       // user or YouTube-generated playlist
-  Section,        // a group of items (used in home feed, charts)
-  Thumbnail,      // image with url, width, height
+  MediaItem,      // Song | Album | Artist | Playlist
+  Song,           // type: "song", videoId, title, artist, album?, duration, thumbnails
+  Album,          // type: "album", browseId, title, artist, year?, thumbnails, tracks
+  Artist,         // type: "artist", channelId, name, subscribers?, thumbnails, songs, albums, singles
+  Playlist,       // type: "playlist", playlistId, title, thumbnails
+  Section,        // title + items[] — used in home feed and charts
+  Thumbnail,      // { url, width, height }
 
   // --- Stream data ---
-  StreamingData,  // resolved stream URL + metadata
+  StreamingData,  // url, codec, bitrate, expiresAt, loudnessDb?, sizeBytes?
   StreamQuality,  // "high" | "low"
-  AudioTrack,     // Song + StreamingData combined
+  AudioTrack,     // Song + stream: StreamingData
 
   // --- Search ---
-  SearchFilter,   // "songs" | "albums" | "artists" | "playlists" | enum
+  SearchFilter,   // "songs" | "albums" | "artists" | "playlists" — also a const enum
   SearchOptions,  // { filter?: SearchFilter }
   SearchResults,  // { songs, albums, artists, playlists }
 
@@ -33,24 +33,26 @@ import type {
 
   // --- Download ---
   DownloadFormat,  // "opus" | "m4a"
-  DownloadOptions, // { path, format?, onProgress? }
+  DownloadOptions, // { path?, format?, onProgress? }
 
   // --- Browse ---
-  BrowseOptions,   // { country?: string }  (used in getCharts)
+  BrowseOptions,   // { country?: string }
 
   // --- Config ---
   MusicKitConfig,     // full constructor options
   RateLimitConfig,    // { search?, browse?, stream?, autocomplete? }
   CacheConfig,        // { dir?, enabled?, ttl? }
   CacheTTLConfig,     // { stream?, search?, home?, artist? }
-  LogLevel,           // "debug" | "info" | "warning" | "error" | "silent"
+  LogLevel,           // "debug" | "info" | "warn" | "error" | "silent"
 
   // --- Events ---
-  MusicKitEvent,      // union of all event names
+  MusicKitEvent,      // union of all event name strings
   MusicKitRequest,    // { method, endpoint, headers, body }
-  MusicKitError,      // { code, message, endpoint?, statusCode? }
-  MusicKitErrorCode,  // enum of all error codes
-} from 'musickit'
+  MusicKitError,      // { code: MusicKitErrorCode, message, endpoint?, statusCode? }
+  MusicKitErrorCode,  // const enum of all error codes
+} from 'musicstream-sdk'
+
+import { SearchFilter, MusicKitErrorCode } from 'musicstream-sdk'
 
 // ─────────────────────────────────────────────
 // Data model shapes (for reference)
@@ -105,20 +107,34 @@ const track: AudioTrack = {
 }
 
 // ─────────────────────────────────────────────
+// SearchFilter — works as both value and type
+// ─────────────────────────────────────────────
+
+// As a value (for autocomplete-friendly code):
+const _ = SearchFilter.Songs      // "songs"
+const __ = SearchFilter.Albums    // "albums"
+const ___ = SearchFilter.Artists  // "artists"
+
+// As a type annotation:
+const filter: SearchFilter = "songs"
+
+// ─────────────────────────────────────────────
 // Error codes
 // ─────────────────────────────────────────────
 
-// MusicKitErrorCode enum values:
+// MusicKitErrorCode values:
 //
-//   RateLimited         → 429 from YouTube — backing off
-//   Forbidden           → 403 — visitor ID refreshed and retried
-//   VideoUnavailable    → video was removed or doesn't exist
-//   VideoUnplayable     → geo-restricted, age-gated, or premium
-//   CipherFailure       → YouTube changed the stream cipher — update the package
-//   NetworkError        → no internet / request timeout
-//   ParseError          → YouTube changed their API response shape
-//   DownloadError       → file write failed (permissions, disk space)
-//   Unknown             → unexpected error
+//   RateLimited         → "RATE_LIMITED"       — 429 from YouTube
+//   Forbidden           → "FORBIDDEN"           — 403
+//   VideoUnavailable    → "VIDEO_UNAVAILABLE"   — removed/doesn't exist
+//   VideoUnplayable     → "VIDEO_UNPLAYABLE"    — geo-restricted, age-gated
+//   CipherFailure       → "CIPHER_FAILURE"      — YouTube changed stream cipher
+//   NetworkError        → "NETWORK_ERROR"       — no internet / timeout
+//   ParseError          → "PARSE_ERROR"         — YouTube changed API shape
+//   DownloadError       → "DOWNLOAD_ERROR"      — file write failed
+//   Unknown             → "UNKNOWN"             — unexpected error
+
+const code: MusicKitErrorCode = MusicKitErrorCode.RateLimited
 
 // ─────────────────────────────────────────────
 // Event names
@@ -134,3 +150,5 @@ const track: AudioTrack = {
 //   "visitorIdRefreshed"  → (oldId: string, newId: string) => void
 //   "retry"               → (endpoint: string, attempt: number, reason: string) => void
 //   "error"               → (err: MusicKitError) => void
+
+export {}

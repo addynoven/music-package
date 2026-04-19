@@ -7,6 +7,7 @@ vi.mock('youtubei.js/agnostic', () => ({
 import { StreamResolver } from '../../../src/stream'
 import { Cache } from '../../../src/cache'
 import { makeStreamingData, makeExpiredStreamingData } from '../../helpers/mock-factory'
+import { Platform } from 'youtubei.js/agnostic'
 
 function makeFmt(bitrate = 160_000, codec = 'opus', url = 'https://rr5---sn-test.googlevideo.com/videoplayback?expire=9999999999') {
   return {
@@ -28,6 +29,20 @@ function makeYt(formats: ReturnType<typeof makeFmt>[] = [makeFmt()]) {
     session: { player: {} },
   }
 }
+
+describe('patchEvalIfNeeded', () => {
+  it('calls Platform.load with a patched eval when shim has an eval function', () => {
+    const mockLoad = vi.fn()
+    ;(Platform as any).shim = { someField: true, eval: vi.fn() }
+    ;(Platform as any).load = mockLoad
+
+    new StreamResolver(new Cache({ enabled: false }), {} as any)
+
+    expect(mockLoad).toHaveBeenCalledWith(expect.objectContaining({ eval: expect.any(Function) }))
+
+    ;(Platform as any).shim = null
+  })
+})
 
 describe('StreamResolver', () => {
   let cache: Cache
@@ -111,6 +126,18 @@ describe('StreamResolver', () => {
       await resolver.resolve('bad-id').catch(() => {})
 
       expect(cache.get('stream:bad-id:high')).toBeNull()
+    })
+  })
+
+  describe('parseExpiry (URL without expire param)', () => {
+    it('returns expiresAt of 0 for a URL with no expire parameter', async () => {
+      const noExpireFmt = makeFmt(160_000, 'opus', 'https://rr5---sn.googlevideo.com/videoplayback')
+      const noExpireYt = makeYt([noExpireFmt])
+      const noExpireResolver = new StreamResolver(new Cache({ enabled: false }), noExpireYt as any)
+
+      const result = await noExpireResolver.resolve('vid-no-expire', 'high')
+
+      expect(result.expiresAt).toBe(0)
     })
   })
 

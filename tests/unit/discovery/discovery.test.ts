@@ -120,6 +120,24 @@ describe('DiscoveryClient', () => {
       expect(results.albums).toHaveLength(0)
     })
 
+    it('falls back to author.name when item has no artists array', async () => {
+      const noArtistsItem = { ...makeSongItem(), artists: undefined, author: { name: 'Fallback Author' } }
+      mockYt.music.search.mockResolvedValue({ contents: [{ contents: [noArtistsItem] }] })
+
+      const results = await client.search('test') as any
+
+      expect(results.songs[0].artist).toBe('Fallback Author')
+    })
+
+    it('falls back to Unknown Artist when item has neither artists nor author', async () => {
+      const bareItem = { id: 'xyz', title: 'Title', duration: { seconds: 100 }, item_type: 'song', thumbnail: {} }
+      mockYt.music.search.mockResolvedValue({ contents: [{ contents: [bareItem] }] })
+
+      const results = await client.search('test') as any
+
+      expect(results.songs[0].artist).toBe('Unknown Artist')
+    })
+
     it('returns filtered album results when filter is "albums"', async () => {
       mockYt.music.search.mockResolvedValue({ contents: [{ contents: [makeAlbumItem()] }] })
 
@@ -130,6 +148,15 @@ describe('DiscoveryClient', () => {
       expect(result[0].browseId).toBe('MPREb_4pL8gzRtw1v')
       expect(result[0].title).toBe('A Night at the Opera')
       expect(result[0].artist).toBe('Queen')
+    })
+
+    it('uses endpoint.payload.browseId when album item has no direct id', async () => {
+      const noIdAlbum = { ...makeAlbumItem(), id: undefined, endpoint: { payload: { browseId: 'alt-browse-id' } } }
+      mockYt.music.search.mockResolvedValue({ contents: [{ contents: [noIdAlbum] }] })
+
+      const result = await client.search('q', { filter: 'albums' }) as any[]
+
+      expect(result[0].browseId).toBe('alt-browse-id')
     })
 
     it('returns filtered artist results when filter is "artists"', async () => {

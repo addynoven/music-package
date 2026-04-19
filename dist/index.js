@@ -277,6 +277,16 @@ var SessionManager = class {
 };
 
 // src/discovery/index.ts
+function extractText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.text === "string") return value.text;
+  if (typeof value.toString === "function") {
+    const s = value.toString();
+    if (s !== "[object Object]") return s;
+  }
+  return "";
+}
 function mapThumbnails(item) {
   return (item?.thumbnail?.contents ?? item?.thumbnails ?? []).map((t) => ({
     url: t.url ?? "",
@@ -285,22 +295,22 @@ function mapThumbnails(item) {
   }));
 }
 function mapSongItem(item) {
-  const artist = item.artists?.[0]?.name ?? item.author?.name ?? "Unknown Artist";
+  const artist = extractText(item.artists?.[0]?.name) || extractText(item.author?.name) || "Unknown Artist";
   return {
     type: "song",
     videoId: item.id ?? "",
-    title: item.title ?? "Unknown",
+    title: extractText(item.title) || "Unknown",
     artist,
     duration: item.duration?.seconds ?? 0,
     thumbnails: mapThumbnails(item)
   };
 }
 function mapAlbumItem(item) {
-  const artist = item.artists?.[0]?.name ?? item.author?.name ?? "Unknown Artist";
+  const artist = extractText(item.artists?.[0]?.name) || extractText(item.author?.name) || "Unknown Artist";
   return {
     type: "album",
     browseId: item.id ?? item.endpoint?.payload?.browseId ?? "",
-    title: item.title ?? item.name ?? "Unknown",
+    title: extractText(item.title) || extractText(item.name) || "Unknown",
     artist,
     year: item.year,
     thumbnails: mapThumbnails(item),
@@ -311,7 +321,7 @@ function mapArtistItem(item) {
   return {
     type: "artist",
     channelId: item.id ?? item.channel_id ?? "",
-    name: item.name ?? item.title ?? "Unknown",
+    name: extractText(item.name) || extractText(item.title) || "Unknown",
     thumbnails: mapThumbnails(item),
     songs: [],
     albums: [],
@@ -324,6 +334,23 @@ function flatContents(res) {
 var DiscoveryClient = class {
   constructor(yt) {
     this.yt = yt;
+  }
+  async getInfo(videoId) {
+    const info = await this.yt.music.getInfo(videoId);
+    const basic = info?.basic_info ?? {};
+    return {
+      type: "song",
+      videoId,
+      title: extractText(basic.title) || "Unknown",
+      artist: extractText(basic.author) || "Unknown Artist",
+      album: extractText(basic.album?.name) || void 0,
+      duration: basic.duration ?? 0,
+      thumbnails: (basic.thumbnail ?? []).map((t) => ({
+        url: t.url ?? "",
+        width: t.width ?? 0,
+        height: t.height ?? 0
+      }))
+    };
   }
   async autocomplete(query) {
     const res = await this.yt.music.getSearchSuggestions(query);
@@ -358,20 +385,20 @@ var DiscoveryClient = class {
   async getHome() {
     const res = await this.yt.music.getHomeFeed();
     return (res?.sections ?? res?.contents ?? []).map((s) => ({
-      title: s.title?.text ?? s.header?.title?.text ?? "",
+      title: extractText(s.title) || extractText(s.header?.title) || "",
       items: (s.contents ?? []).map(mapSongItem)
     }));
   }
   async getArtist(channelId) {
     const res = await this.yt.music.getArtist(channelId);
     if (!res) throw new Error(`Artist not found: ${channelId}`);
-    const name = res.header?.title?.text ?? "Unknown";
+    const name = extractText(res.header?.title) || "Unknown";
     const songs = [];
     const albums = [];
     const singles = [];
     for (const section of res.sections ?? []) {
       const contents = section.contents ?? [];
-      const title = (section.title?.text ?? section.header?.title?.text ?? "").toLowerCase();
+      const title = (extractText(section.title) || extractText(section.header?.title) || "").toLowerCase();
       if (title.includes("song")) songs.push(...contents.map(mapSongItem));
       else if (title.includes("single")) singles.push(...contents.map(mapAlbumItem));
       else if (title.includes("album") || title.includes("release")) albums.push(...contents.map(mapAlbumItem));
@@ -392,15 +419,15 @@ var DiscoveryClient = class {
     const tracks = (res.contents ?? []).map((t) => ({
       type: "song",
       videoId: t.id ?? "",
-      title: t.title ?? "Unknown",
-      artist: t.artists?.[0]?.name ?? "Unknown Artist",
+      title: extractText(t.title) || "Unknown",
+      artist: extractText(t.artists?.[0]?.name) || "Unknown Artist",
       duration: t.duration?.seconds ?? 0,
       thumbnails: mapThumbnails(res.header)
     }));
     return {
       type: "album",
       browseId,
-      title: res.header?.title?.text ?? "Unknown",
+      title: extractText(res.header?.title) || "Unknown",
       artist: res.header?.subtitle?.runs?.[2]?.text ?? "Unknown Artist",
       year: res.header?.subtitle?.runs?.[4]?.text,
       thumbnails: mapThumbnails(res.header),
@@ -416,10 +443,13 @@ var DiscoveryClient = class {
     return (res?.contents ?? []).flatMap((s) => s.contents ?? []).map(mapSongItem);
   }
   async getCharts(options) {
-    const res = await this.yt.music.getExplore?.(options) ?? { sections: [] };
-    return (res.sections ?? []).map((s) => ({
-      title: s.title?.text ?? "",
-      items: (s.contents ?? []).map(mapSongItem)
+    const res = await this.yt.music.getCharts?.(options?.country) ?? { sections: [] };
+    return (res.sections ?? res.contents ?? []).map((s) => ({
+      title: extractText(s.title) || extractText(s.header?.title) || "",
+      items: (s.contents ?? []).flatMap((item) => {
+        if (item.contents) return item.contents.map(mapSongItem);
+        return [mapSongItem(item)];
+      })
     }));
   }
 };
@@ -725,12 +755,10 @@ var MusicKit = class _MusicKit {
   }
   async getTrack(videoId) {
     await this.ensureClients();
-    const [songs, streamData] = await Promise.all([
-      this.call("search", () => this._discovery.search(videoId, { filter: "songs" })),
+    const [song, streamData] = await Promise.all([
+      this.call("browse", () => this._discovery.getInfo(videoId)),
       this.call("stream", () => this._stream.resolve(videoId, "high"))
     ]);
-    const song = Array.isArray(songs) ? songs[0] : void 0;
-    if (!song) throw new Error(`Track not found: ${videoId}`);
     return { ...song, stream: streamData };
   }
   async getHome() {

@@ -154,14 +154,10 @@ export class MusicKit {
 
   async getTrack(videoId: string): Promise<AudioTrack> {
     await this.ensureClients()
-    const [songs, streamData] = await Promise.all([
-      this.call('search', () => this._discovery!.search(videoId, { filter: 'songs' })),
+    const [song, streamData] = await Promise.all([
+      this.call('browse', () => this._discovery!.getInfo(videoId)),
       this.call('stream', () => this._stream!.resolve(videoId, 'high')),
     ])
-
-    const song = Array.isArray(songs) ? (songs as Song[])[0] : undefined
-    if (!song) throw new Error(`Track not found: ${videoId}`)
-
     return { ...song, stream: streamData }
   }
 

@@ -293,6 +293,7 @@ declare class SessionManager {
 declare class DiscoveryClient {
     private readonly yt;
     constructor(yt: Innertube);
+    getInfo(videoId: string): Promise<Song>;
     autocomplete(query: string): Promise<string[]>;
     search(query: string, options?: {
         filter?: SearchFilter;

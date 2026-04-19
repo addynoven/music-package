@@ -2,6 +2,7 @@ import { createWriteStream } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { StreamResolver } from '../stream'
+import type { DiscoveryClient } from '../discovery'
 import type { Song } from '../models'
 
 type DownloadFormat = 'opus' | 'm4a'
@@ -41,22 +42,21 @@ function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat
 }
 
 export class Downloader {
-  constructor(private readonly resolver: StreamResolver) {}
+  constructor(
+    private readonly resolver: StreamResolver,
+    private readonly discovery: DiscoveryClient,
+  ) {}
 
   async download(videoId: string, options: DownloadOptions = {}): Promise<void> {
     const format = options.format ?? 'opus'
     const codec = format === 'm4a' ? 'mp4a' : 'opus'
 
-    const stream = await this.resolver.resolve(videoId, { codec } as any)
-
-    const song: Song = options._mockSong ?? {
-      type: 'song',
-      videoId,
-      title: videoId,
-      artist: 'Unknown',
-      duration: 0,
-      thumbnails: [],
-    }
+    const [stream, song] = await Promise.all([
+      this.resolver.resolve(videoId, { codec } as any),
+      options._mockSong
+        ? Promise.resolve(options._mockSong)
+        : this.discovery.getInfo(videoId),
+    ])
 
     const filename = `${sanitize(song.title)} (${sanitize(song.artist)}).${format}`
     const dest = join(options.path ?? '.', filename)

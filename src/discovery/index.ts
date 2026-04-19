@@ -188,7 +188,7 @@ export class DiscoveryClient {
   }
 
   async getCharts(options?: { country?: string }): Promise<Section[]> {
-    const res = await (this.yt.music as any).getCharts?.(options?.country) ?? { sections: [] }
+    const res = await (this.yt.music as any).getExplore?.(options) ?? { sections: [] }
     return (res.sections ?? res.contents ?? []).map((s: any) => ({
       title: extractText(s.title) || extractText(s.header?.title) || '',
       items: (s.contents ?? []).flatMap((item: any) => {

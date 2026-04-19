@@ -443,7 +443,7 @@ var DiscoveryClient = class {
     return (res?.contents ?? []).flatMap((s) => s.contents ?? []).map(mapSongItem);
   }
   async getCharts(options) {
-    const res = await this.yt.music.getCharts?.(options?.country) ?? { sections: [] };
+    const res = await this.yt.music.getExplore?.(options) ?? { sections: [] };
     return (res.sections ?? res.contents ?? []).map((s) => ({
       title: extractText(s.title) || extractText(s.header?.title) || "",
       items: (s.contents ?? []).flatMap((item) => {
@@ -551,21 +551,17 @@ function ytdlpDownload(videoId, destFile, format) {
   });
 }
 var Downloader = class {
-  constructor(resolver) {
+  constructor(resolver, discovery) {
     this.resolver = resolver;
+    this.discovery = discovery;
   }
   async download(videoId, options = {}) {
     const format = options.format ?? "opus";
     const codec = format === "m4a" ? "mp4a" : "opus";
-    const stream = await this.resolver.resolve(videoId, { codec });
-    const song = options._mockSong ?? {
-      type: "song",
-      videoId,
-      title: videoId,
-      artist: "Unknown",
-      duration: 0,
-      thumbnails: []
-    };
+    const [stream, song] = await Promise.all([
+      this.resolver.resolve(videoId, { codec }),
+      options._mockSong ? Promise.resolve(options._mockSong) : this.discovery.getInfo(videoId)
+    ]);
     const filename = `${sanitize(song.title)} (${sanitize(song.artist)}).${format}`;
     const dest = (0, import_node_path.join)(options.path ?? ".", filename);
     if (options._mockReadStream) {
@@ -685,7 +681,7 @@ var MusicKit = class _MusicKit {
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
       this._stream = new StreamResolver(this.cache, _yt);
-      this._downloader = new Downloader(this._stream);
+      this._downloader = new Downloader(this._stream, this._discovery);
     }
   }
   static async create(config = {}) {
@@ -700,7 +696,7 @@ var MusicKit = class _MusicKit {
     const yt = await this._ytPromise;
     this._discovery = new DiscoveryClient(yt);
     this._stream = new StreamResolver(this.cache, yt);
-    this._downloader = new Downloader(this._stream);
+    this._downloader = new Downloader(this._stream, this._discovery);
   }
   async call(endpoint, fn) {
     const req = makeReq(endpoint);

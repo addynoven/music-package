@@ -328,7 +328,8 @@ interface DownloadOptions {
 }
 declare class Downloader {
     private readonly resolver;
-    constructor(resolver: StreamResolver);
+    private readonly discovery;
+    constructor(resolver: StreamResolver, discovery: DiscoveryClient);
     download(videoId: string, options?: DownloadOptions): Promise<void>;
     private fetchAndWrite;
     private readWithProgress;

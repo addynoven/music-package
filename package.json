@@ -1,6 +1,6 @@
 {
   "name": "musicstream-sdk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "YouTube Music SDK — clean API for search, stream, browse, and download",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

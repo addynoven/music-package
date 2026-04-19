@@ -66,7 +66,7 @@ export class MusicKit {
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt)
       this._stream = new StreamResolver(this.cache, _yt)
-      this._downloader = new Downloader(this._stream)
+      this._downloader = new Downloader(this._stream, this._discovery!)
     }
   }
 
@@ -83,7 +83,7 @@ export class MusicKit {
     const yt = await this._ytPromise
     this._discovery = new DiscoveryClient(yt)
     this._stream = new StreamResolver(this.cache, yt)
-    this._downloader = new Downloader(this._stream)
+    this._downloader = new Downloader(this._stream, this._discovery)
   }
 
   private async call<T>(endpoint: string, fn: () => Promise<T>): Promise<T> {

@@ -1,0 +1,20 @@
+[
+  {
+    "type": "song",
+    "videoId": "HgzGwKwLmgM",
+    "title": "Don't Stop Me Now",
+    "artist": "Queen",
+    "album": "Jazz",
+    "duration": 209,
+    "thumbnails": [{ "url": "https://lh3.googleusercontent.com/thumb1", "width": 226, "height": 226 }]
+  },
+  {
+    "type": "song",
+    "videoId": "d-diB65scQU",
+    "title": "We Will Rock You",
+    "artist": "Queen",
+    "album": "News of the World",
+    "duration": 122,
+    "thumbnails": [{ "url": "https://lh3.googleusercontent.com/thumb2", "width": 226, "height": 226 }]
+  }
+]

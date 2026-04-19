@@ -1,0 +1,44 @@
+[
+  {
+    "title": "Quick picks",
+    "items": [
+      {
+        "type": "song",
+        "videoId": "dQw4w9WgXcQ",
+        "title": "Never Gonna Give You Up",
+        "artist": "Rick Astley",
+        "album": "Whenever You Need Somebody",
+        "duration": 213,
+        "thumbnails": [{ "url": "https://lh3.googleusercontent.com/thumb1", "width": 226, "height": 226 }]
+      }
+    ]
+  },
+  {
+    "title": "Trending",
+    "items": [
+      {
+        "type": "song",
+        "videoId": "fJ9rUzIMcZQ",
+        "title": "Bohemian Rhapsody",
+        "artist": "Queen",
+        "album": "A Night at the Opera",
+        "duration": 354,
+        "thumbnails": [{ "url": "https://lh3.googleusercontent.com/thumb2", "width": 226, "height": 226 }]
+      }
+    ]
+  },
+  {
+    "title": "New releases",
+    "items": [
+      {
+        "type": "album",
+        "browseId": "MPREb_test123",
+        "title": "Test Album 2024",
+        "artist": "Test Artist",
+        "year": "2024",
+        "thumbnails": [{ "url": "https://lh3.googleusercontent.com/album1", "width": 226, "height": 226 }],
+        "tracks": []
+      }
+    ]
+  }
+]

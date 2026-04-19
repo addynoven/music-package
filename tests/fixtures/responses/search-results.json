@@ -1,0 +1,55 @@
+{
+  "songs": [
+    {
+      "type": "song",
+      "videoId": "dQw4w9WgXcQ",
+      "title": "Never Gonna Give You Up",
+      "artist": "Rick Astley",
+      "album": "Whenever You Need Somebody",
+      "duration": 213,
+      "thumbnails": [
+        { "url": "https://lh3.googleusercontent.com/thumb1", "width": 226, "height": 226 },
+        { "url": "https://lh3.googleusercontent.com/thumb1=w576", "width": 576, "height": 576 }
+      ]
+    },
+    {
+      "type": "song",
+      "videoId": "fJ9rUzIMcZQ",
+      "title": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "album": "A Night at the Opera",
+      "duration": 354,
+      "thumbnails": [
+        { "url": "https://lh3.googleusercontent.com/thumb2", "width": 226, "height": 226 }
+      ]
+    }
+  ],
+  "albums": [
+    {
+      "type": "album",
+      "browseId": "MPREb_4pL8gzRtw1v",
+      "title": "A Night at the Opera",
+      "artist": "Queen",
+      "year": "1975",
+      "thumbnails": [
+        { "url": "https://lh3.googleusercontent.com/album1", "width": 226, "height": 226 }
+      ],
+      "tracks": []
+    }
+  ],
+  "artists": [
+    {
+      "type": "artist",
+      "channelId": "UCiMhD4jzUqG-IgPzUmmytRQ",
+      "name": "Queen",
+      "subscribers": "10M",
+      "thumbnails": [
+        { "url": "https://lh3.googleusercontent.com/artist1", "width": 900, "height": 900 }
+      ],
+      "songs": [],
+      "albums": [],
+      "singles": []
+    }
+  ],
+  "playlists": []
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "title": "Top songs",
+    "items": [
+      {
+        "type": "song",
+        "videoId": "dQw4w9WgXcQ",
+        "title": "Never Gonna Give You Up",
+        "artist": "Rick Astley",
+        "album": "Whenever You Need Somebody",
+        "duration": 213,
+        "thumbnails": [{ "url": "https://lh3.googleusercontent.com/thumb1", "width": 226, "height": 226 }]
+      }
+    ]
+  },
+  {
+    "title": "Top albums",
+    "items": [
+      {
+        "type": "album",
+        "browseId": "MPREb_4pL8gzRtw1v",
+        "title": "A Night at the Opera",
+        "artist": "Queen",
+        "year": "1975",
+        "thumbnails": [{ "url": "https://lh3.googleusercontent.com/opera", "width": 226, "height": 226 }],
+        "tracks": []
+      }
+    ]
+  }
+]

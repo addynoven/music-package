@@ -1,0 +1,8 @@
+{
+  "url": "https://rr5---sn-fixture.googlevideo.com/videoplayback?expire=9999999999&ei=test&ip=203.0.113.1&id=o-fixture&itag=251&source=youtube&requiressl=yes&sig=AQtest&ratebypass=yes",
+  "codec": "opus",
+  "bitrate": 160000,
+  "expiresAt": 9999999999,
+  "loudnessDb": -7.2,
+  "sizeBytes": 3456789
+}

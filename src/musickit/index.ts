@@ -37,6 +37,7 @@ function makeReq(endpoint: string): MusicKitRequest {
 }
 
 export class MusicKit {
+  private readonly config: MusicKitConfig
   private readonly cache: Cache
   private readonly limiter: RateLimiter
   private readonly retry: RetryEngine
@@ -51,6 +52,7 @@ export class MusicKit {
   private _ytPromise: Promise<Innertube> | null = null
 
   constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
+    this.config = config
     const cacheConfig = config.cache ?? {}
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,
@@ -77,7 +79,11 @@ export class MusicKit {
   }
 
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
-    const yt = await Innertube.create({ generate_session_locally: true })
+    const yt = await Innertube.create({
+      generate_session_locally: true,
+      ...(config.language ? { lang: config.language } : {}),
+      ...(config.location ? { location: config.location } : {}),
+    })
     return new MusicKit(config, yt)
   }
 
@@ -94,7 +100,11 @@ export class MusicKit {
   private async ensureClients(): Promise<void> {
     if (!this._discovery) {
       if (!this._ytPromise) {
-        this._ytPromise = Innertube.create({ generate_session_locally: true })
+        this._ytPromise = Innertube.create({
+          generate_session_locally: true,
+          ...(this.config.language ? { lang: this.config.language } : {}),
+          ...(this.config.location ? { location: this.config.location } : {}),
+        })
       }
       const yt = await this._ytPromise
       this._discovery = new DiscoveryClient(yt)

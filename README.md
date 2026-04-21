@@ -277,6 +277,12 @@ const mk = new MusicKit({
   // Session
   visitorId: 'CgtBQnlV...',  // bring your own
   userAgent: 'Mozilla/5.0 ...',
+
+  // YouTube Music locale (sets hl/gl on the Innertube session)
+  language: 'hi',             // BCP-47 language code — affects YT Music search/home language
+  location: 'IN',             // ISO 3166-1 alpha-2 country code — affects YT Music charts/charts
+  // Note: JioSaavn language is passed per-call (getHome/getFeaturedPlaylists options),
+  // not here. Use language/location for YouTube Music locale only.
 })
 ```
 

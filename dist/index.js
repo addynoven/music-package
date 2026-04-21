@@ -1160,6 +1160,7 @@ var MusicKit = class _MusicKit {
     this._stream = null;
     this._downloader = null;
     this._ytPromise = null;
+    this.config = config;
     const cacheConfig = config.cache ?? {};
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,
@@ -1185,7 +1186,11 @@ var MusicKit = class _MusicKit {
     }
   }
   static async create(config = {}) {
-    const yt = await import_youtubei.Innertube.create({ generate_session_locally: true });
+    const yt = await import_youtubei.Innertube.create({
+      generate_session_locally: true,
+      ...config.language ? { lang: config.language } : {},
+      ...config.location ? { location: config.location } : {}
+    });
     return new _MusicKit(config, yt);
   }
   registerSource(source) {
@@ -1199,7 +1204,11 @@ var MusicKit = class _MusicKit {
   async ensureClients() {
     if (!this._discovery) {
       if (!this._ytPromise) {
-        this._ytPromise = import_youtubei.Innertube.create({ generate_session_locally: true });
+        this._ytPromise = import_youtubei.Innertube.create({
+          generate_session_locally: true,
+          ...this.config.language ? { lang: this.config.language } : {},
+          ...this.config.location ? { location: this.config.location } : {}
+        });
       }
       const yt = await this._ytPromise;
       this._discovery = new DiscoveryClient(yt);

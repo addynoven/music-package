@@ -134,6 +134,7 @@ export interface MusicKitConfig {
   visitorId?: string
   userAgent?: string
   language?: string
+  location?: string
   proxy?: string
   maxRetries?: number
   backoffBase?: number

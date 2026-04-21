@@ -143,6 +143,7 @@ interface MusicKitConfig {
     visitorId?: string;
     userAgent?: string;
     language?: string;
+    location?: string;
     proxy?: string;
     maxRetries?: number;
     backoffBase?: number;
@@ -194,6 +195,7 @@ interface AudioSource {
 type EventName = Parameters<MusicKitEmitter['on']>[0];
 type EventHandler<E extends EventName> = Parameters<MusicKitEmitter['on']>[1] & ((...args: any[]) => void);
 declare class MusicKit {
+    private readonly config;
     private readonly cache;
     private readonly limiter;
     private readonly retry;

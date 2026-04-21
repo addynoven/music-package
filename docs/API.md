@@ -88,8 +88,9 @@ YouTube lookup fails. Returns globally-accurate suggestions regardless of source
 ```ts
 mk.getHome(options?: { language?: string }): Promise<Section[]>
 ```
-Curated home feed sections. `language` is passed to JioSaavn (e.g. `'hindi'`,
-`'english'`, `'punjabi'`, `'tamil'`).
+Curated home feed sections. `language` is accepted but currently has no effect —
+JioSaavn's `getBrowseModules` endpoint returns the same content regardless of the
+value passed. The option is kept for future compatibility.
 
 ---
 
@@ -140,7 +141,9 @@ Editorial "you might also like". Routes through DiscoveryClient (YouTube).
 ```ts
 mk.getCharts(options?: { country?: string }): Promise<Section[]>
 ```
-Regional or global charts. Pass ISO 3166-1 alpha-2 country code (e.g. `'US'`, `'IN'`).
+Global charts via YouTube Music. `country` is accepted but currently has no effect —
+the underlying `getExplore()` in youtubei.js does not support country filtering.
+The option is kept for future compatibility.
 
 ---
 

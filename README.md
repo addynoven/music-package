@@ -169,7 +169,8 @@ const upNext = await mk.getSuggestions(songId)  // Song[]
 // Home feed — curated sections
 const home = await mk.getHome()
 const hindiHome = await mk.getHome({ language: 'hindi' })
-// language: 'hindi' | 'english' | 'punjabi' | 'tamil' | 'telugu' | ...
+// Note: language option is currently a no-op — JioSaavn's browse endpoint
+// returns the same content regardless of the value passed.
 
 for (const section of home) {
   console.log(section.title)   // "New Trending", "Charts", etc.
@@ -198,6 +199,8 @@ const related = await mk.getRelated(youtubeVideoId)
 // Charts
 const global = await mk.getCharts()
 const us     = await mk.getCharts({ country: 'US' })
+// Note: country option is currently a no-op — youtubei.js getExplore()
+// does not support country filtering.
 ```
 
 ---

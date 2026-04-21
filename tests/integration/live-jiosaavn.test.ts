@@ -259,5 +259,69 @@ describe.skipIf(SKIP)('Live JioSaavn API — real responses', () => {
         expect(['song', 'album']).toContain(item.type)
       }
     }, 20_000)
+
+    it('language: hindi returns non-empty sections from JioSaavn trending', async () => {
+      const sections = await mk.getHome({ language: 'hindi' })
+
+      expect(Array.isArray(sections)).toBe(true)
+      expect(sections.length).toBeGreaterThan(0)
+      const titles = sections.map(s => s.title)
+      expect(titles.some(t => /trending|release|playlist/i.test(t))).toBe(true)
+    }, 20_000)
+
+    it('hindi home sections contain songs or albums with jio:-prefixed IDs', async () => {
+      const sections = await mk.getHome({ language: 'hindi' })
+      const allItems = sections.flatMap(s => s.items)
+
+      for (const item of allItems.slice(0, 5)) {
+        if (item.type === 'song')  expect(item.videoId).toMatch(/^jio:/)
+        if (item.type === 'album') expect(item.browseId).toMatch(/^jio:/)
+      }
+    }, 20_000)
+  })
+
+  // ─── getFeaturedPlaylists ──────────────────────────────────────────────────
+
+  describe('getFeaturedPlaylists', () => {
+    it('returns Playlist[] for hindi', async () => {
+      const playlists = await mk.getFeaturedPlaylists({ language: 'hindi' })
+
+      expect(Array.isArray(playlists)).toBe(true)
+      expect(playlists.length).toBeGreaterThan(0)
+    }, 20_000)
+
+    it('playlists have jio:-prefixed IDs and titles', async () => {
+      const playlists = await mk.getFeaturedPlaylists({ language: 'hindi' })
+
+      for (const p of playlists.slice(0, 3)) {
+        expect(p.type).toBe('playlist')
+        expect(p.playlistId).toMatch(/^jio:/)
+        expect(p.title).toBeTruthy()
+      }
+    }, 20_000)
+
+    it('returns [] for non-Indian language (ja) without throwing', async () => {
+      const playlists = await mk.getFeaturedPlaylists({ language: 'ja' })
+      expect(playlists).toEqual([])
+    }, 20_000)
+  })
+
+  // ─── getLyrics ────────────────────────────────────────────────────────────
+
+  describe('getLyrics', () => {
+    it('returns a string or null for a jio: song ID', async () => {
+      expect(songId).toMatch(/^jio:/)
+      const lyrics = await mk.getLyrics(songId)
+
+      expect(lyrics === null || typeof lyrics === 'string').toBe(true)
+    }, 20_000)
+
+    it('lyrics do not contain raw <br> HTML tags', async () => {
+      const lyrics = await mk.getLyrics(songId)
+
+      if (lyrics !== null) {
+        expect(lyrics).not.toMatch(/<br\s*\/?>/i)
+      }
+    }, 20_000)
   })
 })

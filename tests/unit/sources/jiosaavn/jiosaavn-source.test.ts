@@ -270,6 +270,23 @@ describe('JioSaavnSource', () => {
       expect(result[0].duration).toBe(252)
     })
 
+    it('song thumbnails have correct dimensions parsed from URL', async () => {
+      // fixture image URL contains "150x150" — should parse to width:150 height:150
+      const result = await source.search('arijit singh', { filter: 'songs' }) as any[]
+      const thumb150 = result[0].thumbnails.find((t: any) => t.url.includes('150x150'))
+      expect(thumb150).toBeDefined()
+      expect(thumb150.width).toBe(150)
+      expect(thumb150.height).toBe(150)
+    })
+
+    it('song thumbnails have correct dimensions for 500x500 variant', async () => {
+      const result = await source.search('arijit singh', { filter: 'songs' }) as any[]
+      const thumb500 = result[0].thumbnails.find((t: any) => t.url.includes('500x500'))
+      expect(thumb500).toBeDefined()
+      expect(thumb500.width).toBe(500)
+      expect(thumb500.height).toBe(500)
+    })
+
     it('returns empty array when client returns no songs', async () => {
       client.searchSongs.mockResolvedValue({ total: 0, start: 0, results: [] })
       const result = await source.search('xyzzy', { filter: 'songs' }) as any[]

@@ -126,6 +126,13 @@ export interface RawSearchAllResponse {
   topquery?: { data: unknown[]; position: number }
 }
 
+export interface RawLyricsResponse {
+  lyrics: string
+  snippet?: string
+  lyrics_copyright?: string
+  id?: string
+}
+
 export interface JioSaavnClient {
   searchSongs(query: string, page: number, limit: number): Promise<RawSearchResponse<RawSong>>
   searchAlbums(query: string, page: number, limit: number): Promise<RawSearchResponse<RawAlbumResult>>
@@ -139,6 +146,7 @@ export interface JioSaavnClient {
   createEntityStation(songId: string): Promise<RawStationResponse>
   getRadioSongs(stationId: string, limit?: number): Promise<RawRadioSongsResponse>
   getHome(language?: string): Promise<RawBrowseModulesResponse>
+  getLyrics(id: string): Promise<RawLyricsResponse>
 }
 
 async function jioFetch<T>(params: string, ctx = 'web6dot0'): Promise<T> {
@@ -198,5 +206,9 @@ export class DefaultJioSaavnClient implements JioSaavnClient {
 
   async getHome(language = 'hindi'): Promise<RawBrowseModulesResponse> {
     return jioFetch(`__call=content.getBrowseModules&language=${encodeURIComponent(language)}`)
+  }
+
+  async getLyrics(id: string): Promise<RawLyricsResponse> {
+    return jioFetch(`__call=lyrics.getLyrics&lyrics_id=${encodeURIComponent(id)}`)
   }
 }

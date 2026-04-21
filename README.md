@@ -1,14 +1,15 @@
-# streamkit
+# musicstream-sdk
 
-A developer-facing SDK for YouTube Music. Clean API for search, autocomplete, stream resolution, browsing, and download. Built for single-user apps: CLI tools, bots, desktop apps, Discord bots.
+Node.js SDK for music search, streaming, browse, lyrics, and download.
+Unified API across JioSaavn and YouTube Music — **no API keys required**.
 
 ```bash
-npm install streamkit
+npm install musicstream-sdk
 # or
-pnpm add streamkit
+pnpm add musicstream-sdk
 ```
 
-> **Requires** [yt-dlp](https://github.com/yt-dlp/yt-dlp) on your PATH for audio download fallback.
+> **Requires** [yt-dlp](https://github.com/yt-dlp/yt-dlp) on your PATH for the download fallback.
 
 ---
 
@@ -19,76 +20,145 @@ import { MusicKit } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 
-const suggestions = await mk.autocomplete('never gonna')
-// → ["never gonna give you up", "never gonna let you down", ...]
+// Search
+const songs = await mk.search('tum hi ho', { filter: 'songs' })
 
-const results = await mk.search('never gonna give you up')
-const song = results.songs[0]
-console.log(`${song.title} by ${song.artist}`)
+// Stream — feed the URL to any audio player
+const stream = await mk.getStream(songs[0].videoId)
+console.log(stream.url)    // https://...
+console.log(stream.codec)  // "opus" or "mp4a"
+console.log(stream.bitrate) // 320000 (bps)
 
-const stream = await mk.getStream(song.videoId)
-console.log(stream.url)   // playable audio URL (~6h TTL)
-console.log(stream.codec) // "opus"
+// Lyrics
+const lyrics = await mk.getLyrics(songs[0].videoId)
+
+// What to play next
+const upNext = await mk.getSuggestions(songs[0].videoId)
 ```
 
 ---
 
-## API
+## How it works
 
-### `new MusicKit(config?)`
+Two sources, one API. JioSaavn is tried first (better for Indian music, streams up to
+320kbps). YouTube Music is the fallback. You never interact with either source directly —
+IDs are opaque tokens you pass back to other methods.
+
+```
+Search / Browse / Lyrics    →  JioSaavn  (primary)
+                             →  YouTube Music  (fallback)
+
+Stream resolution            →  JioSaavn DES-ECB decrypt
+                             →  YouTube InnerTube cipher decode
+                             →  yt-dlp  (last resort)
+
+getSuggestions               →  YouTube recommendation engine
+                               (globally-aware, works for any language/genre)
+                             →  Source-native radio  (fallback)
+```
+
+Platform URLs work anywhere you'd pass an ID — the SDK resolves them automatically:
 
 ```ts
-const mk = new MusicKit()                    // zero config
-const mk = new MusicKit({ logLevel: 'silent' }) // custom config
-const mk = await MusicKit.create()           // eager Innertube init (optional)
+await mk.getStream('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc')
+await mk.getStream('https://www.youtube.com/watch?v=fJ9rUzIMcZQ')
+await mk.getStream('https://music.youtube.com/watch?v=fJ9rUzIMcZQ')
+await mk.search('https://music.youtube.com/search?q=queen')
 ```
 
-See [Configuration](#configuration) for all options.
-
 ---
+
+## API Reference
 
 ### Search & Autocomplete
 
 ```ts
 // Autocomplete
-const suggestions: string[] = await mk.autocomplete('bohemian')
+const hints: string[] = await mk.autocomplete('bohemian')
 
-// Search — mixed results
+// All types at once
 const all = await mk.search('queen')
-// all.songs, all.albums, all.artists, all.playlists
+// all.songs[] · all.albums[] · all.artists[] · all.playlists[]
 
-// Search — filtered by type (TypeScript infers the exact return type)
-const songs:    Song[]    = await mk.search('bohemian rhapsody', { filter: 'songs' })
-const albums:   Album[]   = await mk.search('queen', { filter: 'albums' })
-const artists:  Artist[]  = await mk.search('rick astley', { filter: 'artists' })
+// Filtered (TypeScript infers the exact return type)
+const songs    = await mk.search('bohemian rhapsody', { filter: 'songs' })
+const albums   = await mk.search('a night at the opera', { filter: 'albums' })
+const artists  = await mk.search('queen', { filter: 'artists' })
+const playlists = await mk.search('rock classics', { filter: 'playlists' })
 
-// Using the enum (editor autocomplete)
+// Limit results
+const top5 = await mk.search('shakira', { filter: 'songs', limit: 5 })
+
+// Using the SearchFilter enum
 import { SearchFilter } from 'musicstream-sdk'
-const songs = await mk.search('queen', { filter: SearchFilter.Songs })
+await mk.search('queen', { filter: SearchFilter.Songs })
 ```
 
 ---
 
-### Stream resolution
+### Streaming
 
 ```ts
 // Get a playable URL
-const stream: StreamingData = await mk.getStream('fJ9rUzIMcZQ')
-stream.url        // "https://rr5---.googlevideo.com/videoplayback?..."
-stream.codec      // "opus" | "mp4a"
-stream.bitrate    // 160000 (bps)
-stream.expiresAt  // Unix timestamp
-stream.loudnessDb // -7.2 (LUFS, optional)
-stream.sizeBytes  // 3456789 (optional)
+const stream = await mk.getStream(songId)
+// stream.url        — feed to mpv / ffplay / WebAudio / discord.js VoiceConnection / etc.
+// stream.codec      — "opus" | "mp4a"
+// stream.bitrate    — bits per second (e.g. 320000)
+// stream.expiresAt  — Unix timestamp (~6h from now)
+// stream.loudnessDb — LUFS for volume normalisation (optional)
+// stream.sizeBytes  — file size (optional)
 
 // Quality selection
-const high = await mk.getStream('fJ9rUzIMcZQ', { quality: 'high' }) // default
-const low  = await mk.getStream('fJ9rUzIMcZQ', { quality: 'low' })
+const hq = await mk.getStream(songId, { quality: 'high' })  // default
+const lq = await mk.getStream(songId, { quality: 'low' })   // smaller, faster
 
-// AudioTrack — metadata + stream in one object
-const track: AudioTrack = await mk.getTrack('fJ9rUzIMcZQ')
-track.title        // "Bohemian Rhapsody"
-track.stream.url   // playable URL
+// Check expiry before reusing a cached URL
+import { isStreamExpired } from 'musicstream-sdk'
+if (isStreamExpired(cachedStream)) {
+  const fresh = await mk.getStream(songId)
+}
+
+// Metadata + stream in one call
+const track = await mk.getTrack(songId)
+// track inherits all Song fields plus track.stream: StreamingData
+```
+
+---
+
+### Metadata
+
+```ts
+// Song info without fetching a stream URL
+const song = await mk.getMetadata(songId)
+// song.title · song.artist · song.album · song.duration · song.thumbnails
+
+// Best thumbnail for your display size
+import { getBestThumbnail } from 'musicstream-sdk'
+const thumb = getBestThumbnail(song.thumbnails, 300)  // closest to 300px wide
+console.log(thumb?.url)
+```
+
+---
+
+### Lyrics
+
+```ts
+const lyrics = await mk.getLyrics(songId)  // string | null
+// null for YouTube IDs — lyrics API is JioSaavn only.
+// Works with platform URLs too:
+await mk.getLyrics('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc')
+```
+
+---
+
+### Suggestions (up next)
+
+```ts
+// Globally-aware "up next" — YouTube's recommendation engine under the hood.
+// Works with any song ID regardless of which source it came from.
+const upNext = await mk.getSuggestions(songId)  // Song[]
+
+// Falls back to source-native radio if YouTube lookup fails.
 ```
 
 ---
@@ -96,127 +166,70 @@ track.stream.url   // playable URL
 ### Browse
 
 ```ts
-// Home feed
-const home: Section[] = await mk.getHome()
-// [{ title: "Quick picks", items: Song[] }, { title: "Trending", items: [...] }]
+// Home feed — curated sections
+const home = await mk.getHome()
+const hindiHome = await mk.getHome({ language: 'hindi' })
+// language: 'hindi' | 'english' | 'punjabi' | 'tamil' | 'telugu' | ...
+
+for (const section of home) {
+  console.log(section.title)   // "New Trending", "Charts", etc.
+  console.log(section.items)   // (Song | Album | Playlist)[]
+}
 
 // Artist page
-const artist: Artist = await mk.getArtist('UCiMhD4jzUqG-IgPzUmmytRQ')
-artist.name     // "Queen"
-artist.songs    // Song[]
-artist.albums   // Album[]
-artist.singles  // Album[]
+const artist = await mk.getArtist(channelId)
+// artist.name · artist.subscribers · artist.songs · artist.albums · artist.singles · artist.thumbnails
 
 // Album page
-const album: Album = await mk.getAlbum('MPREb_4pL8gzRtw1v')
-album.title   // "A Night at the Opera"
-album.tracks  // Song[] — all tracks in order
+const album = await mk.getAlbum(browseId)
+// album.title · album.artist · album.year · album.tracks (Song[])
 
-// Auto-generated radio from a seed song
-const radio: Song[] = await mk.getRadio('fJ9rUzIMcZQ')
+// Playlist
+const playlist = await mk.getPlaylist(playlistId)
+// Works with JioSaavn playlist IDs and YouTube playlist IDs (PLxxx)
+// playlist.title · playlist.songs · playlist.songCount
 
-// Related songs
-const related: Song[] = await mk.getRelated('fJ9rUzIMcZQ')
+// Radio — seed-based station (~20 tracks that flow together)
+const radio = await mk.getRadio(songId)
+
+// Related — "you might also like" (YouTube video IDs)
+const related = await mk.getRelated(youtubeVideoId)
 
 // Charts
-const charts: Section[] = await mk.getCharts({ country: 'US' })
-const global: Section[] = await mk.getCharts()
+const global = await mk.getCharts()
+const us     = await mk.getCharts({ country: 'US' })
 ```
 
 ---
 
 ### Download
 
-Saves audio to disk. Uses yt-dlp under the hood (must be installed separately).
-
 ```ts
-// Basic
-await mk.download('fJ9rUzIMcZQ', { path: './music/' })
-// → ./music/Bohemian Rhapsody (Queen).opus
-
-// Format selection
-await mk.download('fJ9rUzIMcZQ', { path: './music/', format: 'm4a' })
-
-// Progress tracking
-await mk.download('fJ9rUzIMcZQ', {
-  path: './music/',
-  onProgress: (percent) => process.stdout.write(`\r${percent}%`),
+// Requires yt-dlp on PATH
+await mk.download(youtubeVideoId, {
+  path: './downloads',
+  format: 'opus',             // 'opus' | 'mp3' | 'm4a' (default: 'opus')
+  quality: 'high',
+  onProgress: (pct) => process.stdout.write(`\r${pct.toFixed(0)}%`),
 })
-
-// Batch download from search
-const songs = await mk.search('queen', { filter: 'songs' })
-for (const song of songs) {
-  await mk.download(song.videoId, { path: './queen/' })
-}
+// File saved as: <title> (<artist>).opus
 ```
 
 ---
 
 ### Events
 
-Hook into MusicKit's internal lifecycle for logging, metrics, or UI feedback.
-
 ```ts
-mk.on('beforeRequest', (req) => {
-  console.log(`→ ${req.endpoint}`)
-})
+mk.on('beforeRequest',  (req) => {})
+mk.on('afterRequest',   (req, durationMs, statusCode) => {})
+mk.on('cacheHit',       (key, ttl) => {})
+mk.on('cacheMiss',      (key) => {})
+mk.on('rateLimited',    (endpoint, waitMs) => {})
+mk.on('retry',          (endpoint, attempt, reason) => {})
+mk.on('error',          (err) => {})
 
-mk.on('afterRequest', (req, durationMs, status) => {
-  console.log(`← ${req.endpoint} ${status} (${durationMs}ms)`)
-})
-
-mk.on('rateLimited', (endpoint, waitMs) => {
-  console.log(`Rate limited on [${endpoint}] — waiting ${waitMs}ms`)
-})
-
-mk.on('cacheHit', (key, ttlRemaining) => {
-  console.log(`Cache hit: ${key}`)
-})
-
-mk.on('cacheMiss', (key) => {
-  console.log(`Cache miss: ${key}`)
-})
-
-mk.on('retry', (endpoint, attempt, reason) => {
-  console.log(`Retrying ${endpoint} (attempt ${attempt}/3): ${reason}`)
-})
-
-mk.on('error', (err) => {
-  console.error(err.message)
-})
-
-// Remove a listener
-const handler = (key: string) => console.log(key)
-mk.on('cacheHit', handler)
-mk.off('cacheHit', handler)
+mk.off('error', handler)
 ```
-
----
-
-### Error codes
-
-```ts
-import { MusicKitErrorCode } from 'musicstream-sdk'
-import type { MusicKitError } from 'musicstream-sdk'
-
-mk.on('error', (err: MusicKitError) => {
-  if (err.code === MusicKitErrorCode.RateLimited)      console.warn('Rate limited')
-  if (err.code === MusicKitErrorCode.VideoUnavailable) console.warn('Video removed')
-  if (err.code === MusicKitErrorCode.CipherFailure)    console.error('Update musickit')
-})
-```
-
-| Code | Meaning |
-|---|---|
-| `RateLimited` | 429 from YouTube — backing off |
-| `Forbidden` | 403 — visitor ID refreshed and retried |
-| `VideoUnavailable` | Video removed or doesn't exist |
-| `VideoUnplayable` | Geo-restricted, age-gated, or premium |
-| `CipherFailure` | YouTube changed stream cipher — update the package |
-| `NetworkError` | No internet / request timeout |
-| `ParseError` | YouTube changed API response shape |
-| `DownloadError` | File write failed (permissions, disk space) |
-| `Unknown` | Unexpected error |
 
 ---
 
@@ -226,40 +239,89 @@ All options are optional. MusicKit works out of the box with zero config.
 
 ```ts
 const mk = new MusicKit({
-  // Logging
-  logLevel: 'info',           // "debug" | "info" | "warn" | "error" | "silent"
+  logLevel: 'warn',           // 'debug' | 'info' | 'warn' | 'error' | 'silent'
 
-  // Rate limiting (requests per minute per endpoint)
+  // Rate limits (requests per minute per endpoint)
   rateLimit: {
-    search: 10,               // default
-    browse: 20,               // default
-    stream: 5,                // default
-    autocomplete: 30,         // default
+    search:       10,
+    browse:       20,
+    stream:        5,
+    autocomplete: 30,
   },
+  minRequestGap: 100,         // ms minimum between any two requests
 
-  // Minimum gap between any two requests (ms)
-  minRequestGap: 100,         // default
+  // Retry
+  maxRetries:  3,
+  backoffBase: 1000,          // ms
+  backoffMax:  30000,         // ms
 
-  // Retry behaviour
-  maxRetries: 3,              // default
-  backoffMax: 60_000,         // default — max backoff 60s
-
-  // Session
-  visitorId: 'CgtBQnlVMn...', // bring your own visitor ID
-  userAgent: 'Mozilla/5.0 ...', // override User-Agent
-
-  // Caching (SQLite)
+  // SQLite cache
   cache: {
-    dir: './my_cache',        // default: OS temp dir
-    enabled: true,            // default
+    enabled: true,
+    dir: './cache',           // default: OS temp dir
     ttl: {
-      stream: 21_600,         // 6 hours (default)
-      search: 300,            // 5 minutes (default)
-      home: 28_800,           // 8 hours (default)
-      artist: 3_600,          // 1 hour (default)
+      stream: 21600,          // 6h (default)
+      search:   300,          // 5min (default)
+      home:   28800,          // 8h (default)
+      artist:  3600,          // 1h (default)
     },
   },
+
+  // Session
+  visitorId: 'CgtBQnlV...',  // bring your own
+  userAgent: 'Mozilla/5.0 ...',
 })
+```
+
+---
+
+## Custom sources (plugin system)
+
+Implement `AudioSource` to add any platform without touching the core:
+
+```ts
+import type { AudioSource, Song, StreamingData, SearchResults } from 'musicstream-sdk'
+
+class MySource implements AudioSource {
+  readonly name = 'my-source'
+
+  canHandle(query: string): boolean {
+    return query.startsWith('mysrc:')
+  }
+
+  async search(query: string, options = {}): Promise<SearchResults> { /* ... */ }
+  async getStream(id: string, quality: 'high' | 'low'): Promise<StreamingData> { /* ... */ }
+  async getMetadata(id: string): Promise<Song> { /* ... */ }
+
+  // Optional browse methods
+  async getAlbum?(id: string): Promise<Album> { /* ... */ }
+  async getArtist?(id: string): Promise<Artist> { /* ... */ }
+  async getPlaylist?(id: string): Promise<Playlist> { /* ... */ }
+  async getRadio?(id: string): Promise<Song[]> { /* ... */ }
+  async getHome?(language?: string): Promise<Section[]> { /* ... */ }
+  async getLyrics?(id: string): Promise<string | null> { /* ... */ }
+}
+
+const mk = new MusicKit()
+mk.registerSource(new MySource())
+// Sources are tried in registration order — first canHandle() wins.
+// Registered sources take priority over the built-in JioSaavn + YouTube pipeline.
+```
+
+---
+
+## Exported utilities
+
+```ts
+import { getBestThumbnail, isStreamExpired, SearchFilter, MusicKitErrorCode } from 'musicstream-sdk'
+
+getBestThumbnail(song.thumbnails, 300)  // → Thumbnail | null — closest to 300px
+isStreamExpired(stream)                 // → boolean — true within 5min of expiry
+
+SearchFilter.Songs      // 'songs'
+SearchFilter.Albums     // 'albums'
+SearchFilter.Artists    // 'artists'
+SearchFilter.Playlists  // 'playlists'
 ```
 
 ---
@@ -269,11 +331,11 @@ const mk = new MusicKit({
 ```ts
 interface Song {
   type: 'song'
-  videoId: string
+  videoId: string       // opaque — pass back to getStream, getLyrics, getSuggestions, etc.
   title: string
   artist: string
   album?: string
-  duration: number        // seconds
+  duration: number      // seconds
   thumbnails: Thumbnail[]
 }
 
@@ -284,165 +346,100 @@ interface Album {
   artist: string
   year?: string
   thumbnails: Thumbnail[]
-  tracks: Song[]          // populated by getAlbum(), empty from search()
+  tracks: Song[]        // populated by getAlbum(); empty from search()
 }
 
 interface Artist {
   type: 'artist'
   channelId: string
   name: string
-  subscribers?: string    // e.g. "10M"
+  subscribers?: string  // e.g. "10M"
   thumbnails: Thumbnail[]
-  songs: Song[]           // populated by getArtist(), empty from search()
+  songs: Song[]         // populated by getArtist(); empty from search()
   albums: Album[]
   singles: Album[]
+}
+
+interface Playlist {
+  type: 'playlist'
+  playlistId: string
+  title: string
+  thumbnails: Thumbnail[]
+  songs?: Song[]
+  songCount?: number
 }
 
 interface StreamingData {
   url: string
   codec: 'opus' | 'mp4a'
-  bitrate: number         // bps
-  expiresAt: number       // Unix timestamp
-  loudnessDb?: number     // LUFS
+  bitrate: number       // bps
+  expiresAt: number     // Unix timestamp
+  loudnessDb?: number   // LUFS
   sizeBytes?: number
 }
 
 interface AudioTrack extends Song {
   stream: StreamingData
 }
-```
 
----
-
-## Real-world patterns
-
-### CLI music player
-
-```ts
-const mk = new MusicKit({ logLevel: 'silent' })
-const songs = await mk.search(process.argv[2], { filter: 'songs' })
-const stream = await mk.getStream(songs[0].videoId)
-// execa('mpv', [stream.url])
-```
-
-### Discord bot
-
-```ts
-class MusicBot {
-  private mk = new MusicKit({ cache: { ttl: { search: 900 } } })
-
-  async play(query: string) {
-    const [song] = await this.mk.search(query, { filter: 'songs' })
-    return this.mk.getTrack(song.videoId)
-  }
+interface Thumbnail {
+  url: string
+  width: number
+  height: number
 }
-```
 
-### Download manager
-
-```ts
-const mk = new MusicKit()
-const songs = await mk.search('queen', { filter: 'songs' })
-for (const song of songs) {
-  await mk.download(song.videoId, { path: './music/', format: 'opus' })
+interface Section {
+  title: string
+  items: (Song | Album | Playlist)[]
 }
 ```
 
 ---
 
-## Features
+## Examples
 
-### Search & Autocomplete
+Runnable examples for every feature are in [`examples/`](./examples/):
 
-- [x] `mk.autocomplete(query)` — query suggestions as you type → `string[]`
-- [x] `mk.search(query)` — mixed results → `{ songs, albums, artists, playlists }`
-- [x] `mk.search(query, { filter: 'songs' })` → `Song[]`
-- [x] `mk.search(query, { filter: 'albums' })` → `Album[]`
-- [x] `mk.search(query, { filter: 'artists' })` → `Artist[]`
-- [x] `mk.search(query, { filter: 'playlists' })` → `Playlist[]`
+| File | Covers |
+|------|--------|
+| [`01-quickstart.ts`](./examples/01-quickstart.ts) | Search + stream in 10 lines |
+| [`02-search.ts`](./examples/02-search.ts) | All filters, limit, URL inputs |
+| [`03-stream.ts`](./examples/03-stream.ts) | getStream, getTrack, getMetadata, isStreamExpired |
+| [`04-browse.ts`](./examples/04-browse.ts) | Home, artist, album, playlist, radio, charts |
+| [`05-download.ts`](./examples/05-download.ts) | Audio download with progress |
+| [`06-configuration.ts`](./examples/06-configuration.ts) | All config options |
+| [`07-events.ts`](./examples/07-events.ts) | Event system |
+| [`08-types-reference.ts`](./examples/08-types-reference.ts) | All types with annotations |
+| [`09-real-world.ts`](./examples/09-real-world.ts) | CLI player, Discord bot, player UI, infinite queue |
+| [`10-autocomplete.ts`](./examples/10-autocomplete.ts) | Autocomplete |
+| [`11-advanced-search.ts`](./examples/11-advanced-search.ts) | Pagination, limits, URL inputs |
+| [`12-related-and-radio.ts`](./examples/12-related-and-radio.ts) | getSuggestions, getRadio, getRelated |
+| [`13-custom-source.ts`](./examples/13-custom-source.ts) | Writing a custom AudioSource plugin |
+| [`14-lyrics.ts`](./examples/14-lyrics.ts) | getLyrics, lyrics + metadata together |
 
-### Streaming
+---
 
-- [x] `mk.getStream(videoId)` — resolve playable audio URL → `StreamingData`
-- [x] `mk.getStream(videoId, { quality: 'high' })` — high quality (default)
-- [x] `mk.getStream(videoId, { quality: 'low' })` — low quality / bandwidth saving
-- [x] `mk.getTrack(videoId)` — metadata + stream URL in one call → `AudioTrack`
-- [x] Stream URL includes codec (`opus` or `mp4a`), bitrate, expiry timestamp
-- [x] Loudness normalization value (`loudnessDb`) when available
-- [x] File size in bytes (`sizeBytes`) when available
+## Stability notice
 
-### Browse
+This SDK uses **unofficial APIs** — JioSaavn's internal `api.php` and YouTube's InnerTube
+protocol. Neither has a published SLA. Both can change without notice.
 
-- [x] `mk.getHome()` — home feed with sections (Quick Picks, Trending, etc.) → `Section[]`
-- [x] `mk.getArtist(channelId)` — artist page with songs, albums, singles → `Artist`
-- [x] `mk.getAlbum(browseId)` — album page with full track listing → `Album`
-- [x] `mk.getRadio(videoId)` — auto-generated radio playlist from a seed song → `Song[]`
-- [x] `mk.getRelated(videoId)` — related songs for a given track → `Song[]`
-- [x] `mk.getCharts()` — global charts → `Section[]`
-- [x] `mk.getCharts({ country: 'US' })` — country-specific charts
+What this means in practice:
 
-### Download
-
-- [x] `mk.download(videoId, { path })` — save audio to disk (default: opus)
-- [x] `mk.download(videoId, { path, format: 'opus' })` — Opus format
-- [x] `mk.download(videoId, { path, format: 'm4a' })` — M4A / AAC format
-- [x] `mk.download(videoId, { path, onProgress })` — progress callback `(percent: number) => void`
-- [x] File named automatically: `<title> (<artist>).<format>`
-- [x] Powered by yt-dlp under the hood (must be on PATH)
-
-### Anti-Ban Layer (automatic — no config needed)
-
-**Rate limiting**
-- [x] Per-endpoint rate limits: autocomplete 30/min, browse 20/min, search 10/min, stream 5/min
-- [x] 100ms minimum gap enforced between any two requests
-- [x] Fully configurable via `rateLimit` config option
-
-**Caching (SQLite — zero external deps)**
-- [x] Stream URLs cached for 6 hours
-- [x] Search results cached for 5 minutes
-- [x] Home feed cached for 8 hours
-- [x] Artist pages cached for 1 hour
-- [x] Cache stored in OS temp dir by default (configurable)
-- [x] Cache can be disabled entirely
-
-**Retry engine**
-- [x] Auto-retry on failure — 3 attempts by default
-- [x] Exponential backoff between retries (max 60s)
-- [x] `429 Too Many Requests` → waits 60s then retries
-- [x] `403 Forbidden` → rotates visitor ID and retries
-
-**Session management**
-- [x] Visitor ID generated and cached automatically
-- [x] Visitor ID refreshed every ~30 days
-- [x] Bring your own visitor ID via config
-
-### Events
-
-- [x] `beforeRequest` — fires before every outgoing request `(req: MusicKitRequest) => void`
-- [x] `afterRequest` — fires after every completed request `(req, durationMs, status) => void`
-- [x] `rateLimited` — fires when a request is delayed by rate limiting `(endpoint, waitMs) => void`
-- [x] `cacheHit` — fires when a cached result is returned `(key, ttlRemaining) => void`
-- [x] `cacheMiss` — fires when no cache exists and a network call is made `(key) => void`
-- [x] `visitorIdRefreshed` — fires when the visitor ID is rotated `(oldId, newId) => void`
-- [x] `retry` — fires before each retry attempt `(endpoint, attempt, reason) => void`
-- [x] `error` — fires when a request fails after all retries `(err: MusicKitError) => void`
-- [x] `mk.off(event, handler)` — remove a specific listener
-
-### TypeScript Support
-
-- [x] Full types — all models, options, and events are typed
-- [x] `SearchFilter` works as both a value (`SearchFilter.Songs`) and a type (`'songs'`)
-- [x] `MusicKitErrorCode` typed error codes as a const enum
-- [x] Search overloads — `search(q, { filter: 'songs' })` returns `Song[]` directly (no cast needed)
-- [x] Ships with `.d.ts` declaration files — works in both ESM and CJS projects
-- [x] Zero `any` — strict types throughout
+- **Stream cipher (YouTube)** — can break when YouTube rotates its player JS. Usually
+  fixed in [youtubei.js](https://github.com/LuanRT/YouTube.js) within a few days. Update
+  the package to get the fix.
+- **JioSaavn endpoints** — have been stable for years but are undocumented. Outages are
+  possible.
+- **Don't use this** for infrastructure where an hour of downtime is unacceptable.
+- **Do use this** for Discord bots, CLI tools, desktop apps, and personal projects.
 
 ---
 
 ## Requirements
 
 - Node.js 18+
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH (for download fallback when direct stream URLs fail)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH *(only needed for `download()`)*
 
 ## License
 

@@ -1,14 +1,20 @@
 /**
  * Streaming — resolve a song ID into a playable audio URL.
  *
- * getStream() accepts any ID returned by search(), getAlbum(),
- * getArtist(), getPlaylist(), or getRadio(). Routing is automatic.
+ * getStream()   — accepts any ID returned by search(), getAlbum(),
+ *                 getArtist(), getPlaylist(), getRadio(), or getSuggestions().
+ *                 Routing is automatic regardless of source.
  *
- * Stream URLs are time-limited. Check expiresAt before reuse.
+ * getTrack()    — metadata + stream in one call. Works with any song ID.
+ *
+ * getMetadata() — song metadata only (no stream). Use when you need title,
+ *                 artist, duration, thumbnails without paying for a stream URL.
+ *
+ * Stream URLs are time-limited (~6h). Use isStreamExpired() before reuse.
  */
 
-import { MusicKit } from 'musicstream-sdk'
-import type { StreamingData } from 'musicstream-sdk'
+import { MusicKit, isStreamExpired, getBestThumbnail } from 'musicstream-sdk'
+import type { StreamingData, Song } from 'musicstream-sdk'
 
 const mk = new MusicKit()
 
@@ -21,18 +27,24 @@ async function main() {
   console.log(stream.url)       // https://... — feed directly to your audio player
   console.log(stream.codec)     // "opus" or "mp4a"
   console.log(stream.bitrate)   // bits per second (e.g. 320000 = 320kbps)
-  console.log(stream.expiresAt) // Unix timestamp — URL expires, re-fetch when stale
+  console.log(stream.expiresAt) // Unix timestamp — URL is time-limited
 
-  // Check how long the URL is still valid
-  const ttlSeconds = stream.expiresAt - Math.floor(Date.now() / 1000)
-  console.log(`URL valid for ${Math.floor(ttlSeconds / 3600)}h ${Math.floor((ttlSeconds % 3600) / 60)}m`)
+  // --- Check expiry before reuse ---
+  //
+  // Cache stream URLs in your app but verify before playing.
+  // isStreamExpired() returns true when the URL is within 5 minutes of expiry.
+
+  if (isStreamExpired(stream)) {
+    const fresh = await mk.getStream(songs[0].videoId)
+    console.log(fresh.url)
+  }
 
   // --- Quality selection ---
 
   const high = await mk.getStream(songs[0].videoId, { quality: 'high' }) // default
   const low  = await mk.getStream(songs[0].videoId, { quality: 'low' })
 
-  console.log(high.bitrate)  // higher bitrate
+  console.log(high.bitrate)  // higher bitrate (320kbps from JioSaavn)
   console.log(low.bitrate)   // lower bitrate (faster load, smaller data)
 
   // --- Optional stream fields ---
@@ -40,17 +52,30 @@ async function main() {
   console.log(stream.loudnessDb)  // number | undefined — LUFS for normalization
   console.log(stream.sizeBytes)   // number | undefined — total file size
 
-  // --- getTrack: metadata + stream in one call (YouTube video IDs only) ---
+  // --- getMetadata: song info without fetching a stream ---
   //
-  // Use this when you have a YouTube video URL or ID and want both
-  // the song metadata and stream URL together.
-  //
-  // For IDs returned by search(), use getStream() + the Song from search results.
+  // Useful for building a queue UI, showing song details,
+  // or enriching search results without burning stream quota.
 
-  const track = await mk.getTrack('fJ9rUzIMcZQ')  // YouTube video ID
-  console.log(track.title)        // "Bohemian Rhapsody"
-  console.log(track.artist)       // "Queen"
+  const song: Song = await mk.getMetadata(songs[0].videoId)
+  console.log(song.title)      // "Tum Hi Ho"
+  console.log(song.artist)     // "Arijit Singh"
+  console.log(song.duration)   // seconds
+  console.log(song.thumbnails) // Thumbnail[]
+
+  // Pick the best thumbnail size for your UI
+  const thumb = getBestThumbnail(song.thumbnails, 300) // closest to 300px
+  console.log(thumb?.url)
+
+  // --- getTrack: metadata + stream in one call ---
+  //
+  // Works with any song ID — from JioSaavn search results or YouTube IDs.
+
+  const track = await mk.getTrack(songs[0].videoId)
+  console.log(track.title)        // song metadata
+  console.log(track.artist)
   console.log(track.stream.url)   // ready to play
+  console.log(track.stream.codec)
 }
 
 main()

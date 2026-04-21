@@ -2,7 +2,7 @@
  * Real-world patterns — how MusicKit fits into actual applications.
  */
 
-import { MusicKit } from 'musicstream-sdk'
+import { MusicKit, isStreamExpired, getBestThumbnail } from 'musicstream-sdk'
 import type { Song, StreamingData } from 'musicstream-sdk'
 
 // ─────────────────────────────────────────────
@@ -44,8 +44,6 @@ class MusicBot {
     const song = songs[0]
     const stream = await this.mk.getStream(song.videoId)
     return { song, stream }
-    // song:   title, artist, duration, thumbnails
-    // stream: url, codec, bitrate, expiresAt
   }
 
   async queue(queries: string[]): Promise<Array<{ song: Song; stream: StreamingData }>> {
@@ -55,6 +53,14 @@ class MusicBot {
       if (result) tracks.push(result)
     }
     return tracks
+  }
+
+  // Re-fetch stream when a cached URL is about to expire
+  async refreshIfExpired(song: Song, cached: StreamingData): Promise<StreamingData> {
+    if (isStreamExpired(cached)) {
+      return this.mk.getStream(song.videoId)
+    }
+    return cached
   }
 }
 
@@ -100,7 +106,7 @@ async function streamPlaylist(query: string) {
   if (playlists.length === 0) return
 
   const playlist = await mk.getPlaylist(playlists[0].playlistId)
-  console.log(`Playlist: ${playlist.title} — ${playlist.songs?.length ?? 0} songs`)
+  console.log(`Playlist: ${playlist.title} — ${playlist.songCount ?? playlist.songs?.length ?? 0} songs`)
 
   for (const song of playlist.songs ?? []) {
     const stream = await mk.getStream(song.videoId)
@@ -110,38 +116,69 @@ async function streamPlaylist(query: string) {
 }
 
 // ─────────────────────────────────────────────
-// Pattern 5: Radio (infinite play queue)
+// Pattern 5: Player UI — full song card
 // ─────────────────────────────────────────────
+//
+// Load everything needed for a "now playing" card in one go.
+
+async function loadNowPlaying(query: string) {
+  const mk = new MusicKit({ logLevel: 'silent' })
+
+  const results = await mk.search(query, { filter: 'songs' })
+  if (results.length === 0) return null
+
+  const id = results[0].videoId
+  const [stream, meta, lyrics, suggestions] = await Promise.all([
+    mk.getStream(id),
+    mk.getMetadata(id),
+    mk.getLyrics(id),
+    mk.getSuggestions(id),
+  ])
+
+  const cover = getBestThumbnail(meta.thumbnails, 500)
+
+  return {
+    title: meta.title,
+    artist: meta.artist,
+    duration: meta.duration,
+    coverUrl: cover?.url,
+    streamUrl: stream.url,
+    streamExpiresAt: stream.expiresAt,
+    lyrics,        // string | null
+    upNext: suggestions.slice(0, 10),
+  }
+}
+
+// ─────────────────────────────────────────────
+// Pattern 6: Infinite queue using getSuggestions
+// ─────────────────────────────────────────────
+//
+// getSuggestions uses YouTube's recommendation engine regardless of
+// where the seed ID came from — gives globally-aware "up next" picks.
 
 async function* radioQueue(seedQuery: string): AsyncGenerator<Song> {
   const mk = new MusicKit({ logLevel: 'silent' })
   const seeds = await mk.search(seedQuery, { filter: 'songs' })
   if (seeds.length === 0) return
 
-  let currentSeed = seeds[0].videoId
+  let currentId = seeds[0].videoId
   const played = new Set<string>()
 
   while (true) {
-    const batch = await mk.getRadio(currentSeed)
-    const fresh = batch.filter(s => !played.has(s.videoId))
+    const batch = await mk.getSuggestions(currentId)
+    const fresh = batch.filter((s: Song) => !played.has(s.videoId))
     if (fresh.length === 0) break
 
     for (const song of fresh) {
       played.add(song.videoId)
       yield song
-      currentSeed = song.videoId
+      currentId = song.videoId
     }
   }
 }
 
-// Usage:
-// for await (const song of radioQueue('bohemian rhapsody')) {
-//   const stream = await mk.getStream(song.videoId)
-//   // play stream.url
-// }
-
 // ─────────────────────────────────────────────
-// Pattern 6: Monitoring with events
+// Pattern 7: Monitoring with events
 // ─────────────────────────────────────────────
 
 function createMonitoredClient() {
@@ -167,7 +204,7 @@ function createMonitoredClient() {
 }
 
 // ─────────────────────────────────────────────
-// Pattern 7: Autocomplete endpoint
+// Pattern 8: Autocomplete endpoint
 // ─────────────────────────────────────────────
 
 // app.get('/autocomplete', async (req, res) => {

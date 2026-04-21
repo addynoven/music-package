@@ -25,11 +25,14 @@ function imageToThumbnails(image: unknown): Thumbnail[] {
     ? image
     : Array.isArray(image) ? (image[0] as any)?.link ?? '' : ''
   if (!base) return []
-  return IMAGE_SIZES.map(size => ({
-    url: base.replace(/150x150|50x50/, size).replace(/^http:/, 'https:'),
-    width: 0,
-    height: 0,
-  }))
+  return IMAGE_SIZES.map(size => {
+    const [w, h] = size.split('x').map(Number)
+    return {
+      url: base.replace(/150x150|50x50/, size).replace(/^http:/, 'https:'),
+      width: w,
+      height: h,
+    }
+  })
 }
 
 // ─── mappers ──────────────────────────────────────────────────────────────────
@@ -107,7 +110,7 @@ export class JioSaavnSource implements AudioSource {
     return true
   }
 
-  async search(query: string, options: { filter?: SearchFilter } = {}): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
+  async search(query: string, options: { filter?: SearchFilter; limit?: number } = {}): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
     const { filter } = options
 
     if (filter === 'songs') {
@@ -242,6 +245,15 @@ export class JioSaavnSource implements AudioSource {
     return Object.entries(raw)
       .filter(([key, val]) => key !== 'stationid' && typeof val === 'object' && val !== null && 'song' in val)
       .map(([, val]) => mapSong((val as { song: RawSong }).song))
+  }
+
+  async getLyrics(id: string): Promise<string | null> {
+    try {
+      const raw = await this.client.getLyrics(stripPrefix(id))
+      return raw.lyrics ?? null
+    } catch {
+      return null
+    }
   }
 
   async getHome(language?: string): Promise<Section[]> {

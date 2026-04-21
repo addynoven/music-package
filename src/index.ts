@@ -11,6 +11,8 @@ export { MusicKitEmitter } from './events'
 // Value exports (usable at runtime)
 export { SearchFilter } from './models'
 export { MusicKitErrorCode } from './models'
+export { getBestThumbnail } from './utils/thumbnails'
+export { isStreamExpired } from './utils/stream-utils'
 
 // Type exports
 export type {

@@ -1,132 +1,111 @@
 # musicstream — Roadmap
 
 ## Current State
-- YouTube Music only (InnerTube API)
-- Anti-ban layer: rate limiter, retry engine, SQLite cache, session manager
-- Stream resolution: cipher decoding, yt-dlp fallback
-- Public API: search, autocomplete, stream, track, home, artist, album, radio, related, charts, download
+
+Two-source SDK: JioSaavn (primary) + YouTube Music (fallback).
+Anti-ban layer: rate limiter, retry engine, SQLite cache, session manager.
+Stream resolution: JioSaavn DES-ECB decrypt, YouTube cipher decoding, yt-dlp fallback.
+
+Public API: `search` · `autocomplete` · `getStream` · `getTrack` · `getMetadata` · `getHome` ·
+`getArtist` · `getAlbum` · `getPlaylist` · `getRadio` · `getRelated` · `getSuggestions` ·
+`getLyrics` · `getCharts` · `download`
+
+Utilities exported: `getBestThumbnail` · `isStreamExpired`
 
 ---
 
-## ✅ Phase 1 — Multi-Source Architecture (Plugin System) — DONE
+## ✅ Phase 1 — Multi-Source Architecture — DONE
 
-Refactor `MusicKit` to support pluggable audio sources, like Lavaplayer's source manager pattern.
-First match wins, sources tried in order.
-
-- [x] Define `AudioSource` interface
-  - `canHandle(query: string): boolean`
-  - `search(query: string, options?): Promise<SearchResults | Song[]>`
-  - `getStream(id: string, quality): Promise<StreamingData>`
-  - `getMetadata(id: string): Promise<Song>`
-- [x] Extract current YouTube Music logic into `YouTubeMusicSource` plugin (`src/sources/youtube-music.ts`)
-- [x] `MusicKit` iterates registered sources in order — first match wins (`registerSource` + `sourceFor`)
-- [x] Keep existing public API unchanged — zero breaking changes
-- [x] 175 tests passing (174 pass, 1 pre-existing skip)
+- [x] `AudioSource` interface with `canHandle`, `search`, `getStream`, `getMetadata`
+- [x] `YouTubeMusicSource` extracted into plugin
+- [x] `MusicKit` iterates registered sources — first match wins
+- [x] Zero breaking changes to existing public API
 
 ---
 
 ## ✅ Phase 2 — JioSaavn Source (Primary Stream Source) — DONE
 
-Add JioSaavn as the **first** source in the pipeline. YouTube becomes fallback only.
-
-- [x] Implement `JioSaavnSource` (`src/sources/jiosaavn/`)
-  - Hits `jiosaavn.com/api.php` directly (no dependency on jiosaavn-api project)
-  - `DefaultJioSaavnClient` — ~20-line fetch wrapper with common params
-  - DES-ECB decrypt via `node-forge` (key=`38346591`) — same as jiosaavn-api
-  - Search songs by query → maps to unified `Song` model with `jio:` prefixed videoIds
-  - Get stream URL up to 320kbps
-  - `supportedFilters: ['songs']` — playlist/album/artist searches fall through to YouTube
-- [x] Stream pipeline order (auto-registered in `ensureClients()`):
-  ```
-  1. JioSaavn  → canHandle plain text + jio: IDs (not YouTube URLs/IDs)
-  2. YouTube   → catch-all fallback, anti-ban layer activates here
-  3. NotFound  → throw
-  ```
-- [x] Plain text search goes to JioSaavn first
-- [x] Playlist/album/artist filter searches skip JioSaavn (via `supportedFilters`), route to YouTube
-- [x] All 4 search filter types implemented (songs/albums/artists/playlists — each uses its own JioSaavn endpoint)
-- [x] No-filter search uses `autocomplete.get` — returns all types in one call
-- [x] `supportedFilters` field removed — JioSaavn handles everything YouTube does for search
-- [x] 229 unit tests + 42 live integration tests all passing
+- [x] `JioSaavnSource` + `DefaultJioSaavnClient` — direct `jiosaavn.com/api.php` calls
+- [x] DES-ECB stream URL decryption (node-forge, key `38346591`)
+- [x] `jio:` prefixed IDs for all JioSaavn entities
+- [x] All 4 search filters (songs / albums / artists / playlists)
+- [x] No-filter search via `autocomplete.get` — all types in one call
+- [x] Pipeline order: JioSaavn first → YouTube fallback → throw
 
 ---
 
 ## ✅ Phase 2.5 — JioSaavn Browse Endpoints — DONE
 
-Add the 5 remaining high-value JioSaavn browse endpoints to the source + SDK public API.
-
-- [x] `content.getAlbumDetails` → `getAlbum('jio:xxx')` routes to JioSaavn; non-jio: IDs fall back to YouTube
-- [x] `artist.getArtistPageDetails` → `getArtist('jio:xxx')` routes to JioSaavn; non-jio: IDs fall back to YouTube
-- [x] `playlist.getDetails` → new `getPlaylist('jio:xxx')` on MusicKit (no YouTube playlist support yet)
-- [x] `webradio.createEntityStation` + `webradio.getSong` → `getRadio('jio:xxx')` routes to JioSaavn; non-jio: IDs fall back to YouTube
-- [x] `content.getBrowseModules` → `getHome()` prefers first source with `getHome` (JioSaavn for Bollywood/Indian feed)
-- [x] `AudioSource` interface extended with optional browse methods: `getAlbum?`, `getArtist?`, `getPlaylist?`, `getRadio?`, `getHome?`
+- [x] `getAlbum` · `getArtist` · `getPlaylist` · `getRadio` · `getHome` on JioSaavnSource
+- [x] `AudioSource` interface extended with optional browse methods
 - [x] `Playlist` model extended with `songs?: Song[]`
-- [x] 260 unit tests passing (259 pass, 1 pre-existing skip)
 
 ---
 
-## Phase 3 — Metadata Layer (Platform Link Resolution)
+## ✅ Phase 3 — Platform Link Resolution — DONE
 
-When a user passes a platform link, extract metadata then feed into stream pipeline.
-
-- [ ] Spotify metadata source (optional — requires user-provided keys)
-  - `clientId` + `clientSecret` in `MusicKit` config
-  - Client credentials flow (no user login needed)
-  - Extract title + artist → search stream pipeline
-  - If no keys provided → skip silently
-- [ ] Apple Music metadata source (optional — requires user-provided keys)
-  - `developerToken` in `MusicKit` config
-  - Extract title + artist → search stream pipeline
-  - If no keys provided → skip silently
-- [ ] JioSaavn link resolver (`jiosaavn.com/...` URLs)
-- [ ] Input detection — identify what kind of input was given:
-  ```
-  spotify.com/track/...   → Spotify metadata → stream pipeline
-  music.apple.com/...     → Apple Music metadata → stream pipeline
-  jiosaavn.com/...        → JioSaavn directly
-  youtube.com/...         → YouTube directly
-  plain text              → stream pipeline (JioSaavn first, YouTube fallback)
-  ```
+- [x] JioSaavn URL resolver (`jiosaavn.com/song/...` → `jio:ID`)
+- [x] YouTube URL resolver (`youtube.com/watch?v=ID`, `youtu.be/ID` → bare ID)
+- [x] YouTube Music URL resolver (`music.youtube.com/watch`, `/browse`, `/playlist`, `/search`)
+- [x] `resolveInput(url)` — single entry point for all URL normalisation
+- [x] All public MusicKit methods call `resolveInput` before routing
+- [ ] Spotify metadata source — deferred (requires user keys, not core)
+- [ ] Apple Music metadata source — deferred (requires user keys, not core)
 
 ---
 
-## Phase 4 — Metadata Fallback Chain
+## ✅ Phase 5 — Core UX Improvements — DONE
 
-If primary metadata source doesn't find the song, try the next one.
+### Thumbnails
+- [x] Fix JioSaavn thumbnail dimensions — parse `150x150` pattern from URL
+- [x] `getBestThumbnail(thumbnails, targetSize)` — exported utility
 
-- [ ] Metadata resolution order:
-  ```
-  1. JioSaavn   (best for Indian/Bollywood)
-  2. Spotify    (best structured metadata globally, if keys provided)
-  3. Apple Music (if keys provided)
-  4. YouTube Music (last resort, metadata isn't great)
-  ```
-- [ ] Unified `Song` model regardless of which source provided metadata
+### Lyrics
+- [x] `getLyrics(id)` — JioSaavn `lyrics.getLyrics` endpoint, `null` for YouTube
+
+### Metadata & Track
+- [x] `getMetadata(id)` — public API, routes `jio:` to JioSaavn, YouTube to DiscoveryClient
+- [x] `getTrack()` — fixed for `jio:` IDs (was YouTube-only, now routes correctly)
+
+### Stream
+- [x] `isStreamExpired(stream)` — exported utility, 5-minute safety buffer
+- [x] Auto-refresh — JioSaavn streams now cached with expiry check
+
+### Search
+- [x] `search(query, { filter, limit })` — limit option flows to all sources
+- [x] Autocomplete routing — `jio:` inputs return `[]`, URLs resolved before lookup
+
+### Suggestions (up next)
+- [x] `getSuggestions(id)` — YouTube-first: looks up YouTube ID via metadata search,
+      uses `getRelated` for globally-aware suggestions; falls back to JioSaavn radio
+
+### Browse
+- [x] YouTube playlist support in `getPlaylist()` — non-`jio:` IDs route to DiscoveryClient
+- [x] `getHome({ language })` — JioSaavn language param exposed on public API
 
 ---
 
-## Credentials Design
+## Future Work
 
-- JioSaavn → zero config, always works
-- YouTube Music → zero config, always works
-- Spotify → optional, user brings their own keys (free to get)
-- Apple Music → optional, user brings their own keys (free dev account)
+### Optional Platform Enrichment (Phase 4)
+
+When users supply their own API keys, enrich metadata from Spotify or Apple Music.
+Core streaming (JioSaavn + YouTube) works without any keys.
 
 ```ts
 const mk = new MusicKit({
-  spotify: {
-    clientId: 'your-client-id',
-    clientSecret: 'your-client-secret',
-  },
-  appleMusic: {
-    developerToken: 'your-token',
-  },
+  spotify: { clientId: '...', clientSecret: '...' },
+  appleMusic: { developerToken: '...' },
 })
 ```
 
-**Never put developer tokens in the npm package.**
-SDK users register their own free apps on each platform.
+- [ ] Spotify metadata source — extract title/artist, feed into stream pipeline
+- [ ] Apple Music metadata source — same
+
+### Minor Polish
+
+- [ ] Artist top tracks pagination — `getArtist` hardcoded at `n_song=10, n_album=10`
+- [ ] JioSaavn playlist pagination — `getPlaylist` hardcoded at page 0, limit 20
 
 ---
 
@@ -134,11 +113,9 @@ SDK users register their own free apps on each platform.
 
 | Component | Cost |
 |---|---|
-| JioSaavn API + CDN | Free |
+| JioSaavn API + CDN streams (up to 320kbps) | Free |
 | YouTube Music (InnerTube) | Free |
-| Spotify metadata API | Free |
-| Apple Music metadata API | Free |
-| JioSaavn streams (up to 320kbps) | Free |
-| YouTube streams | Free |
+| Spotify metadata API | Free (free dev account) |
+| Apple Music metadata API | Free (free dev account) |
 
-Everything is free. Forever.
+Everything is free. The optional Spotify/Apple Music integrations only need a free developer account.

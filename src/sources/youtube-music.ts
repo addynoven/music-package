@@ -15,7 +15,7 @@ export class YouTubeMusicSource implements AudioSource {
     return true
   }
 
-  async search(query: string, options: { filter?: SearchFilter } = {}): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
+  async search(query: string, options: { filter?: SearchFilter; limit?: number } = {}): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
     return this.discovery.search(query, options)
   }
 

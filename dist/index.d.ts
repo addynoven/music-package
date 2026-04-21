@@ -67,6 +67,8 @@ interface Playlist {
     playlistId: string;
     title: string;
     thumbnails: Thumbnail[];
+    songs?: Song[];
+    songCount?: number;
 }
 interface Section {
     title: string;
@@ -171,6 +173,23 @@ interface MusicKitError extends Error {
 }
 type MusicKitEvent = 'beforeRequest' | 'afterRequest' | 'cacheHit' | 'cacheMiss' | 'rateLimited' | 'visitorIdRefreshed' | 'retry' | 'error';
 
+interface AudioSource {
+    readonly name: string;
+    canHandle(query: string): boolean;
+    search(query: string, options?: {
+        filter?: SearchFilter;
+        limit?: number;
+    }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]>;
+    getStream(id: string, quality: 'high' | 'low'): Promise<StreamingData>;
+    getMetadata(id: string): Promise<Song>;
+    getAlbum?(id: string): Promise<Album>;
+    getArtist?(id: string): Promise<Artist>;
+    getPlaylist?(id: string): Promise<Playlist>;
+    getRadio?(id: string): Promise<Song[]>;
+    getHome?(language?: string): Promise<Section[]>;
+    getLyrics?(id: string): Promise<string | null>;
+}
+
 type EventName = Parameters<MusicKitEmitter['on']>[0];
 type EventHandler<E extends EventName> = Parameters<MusicKitEmitter['on']>[1] & ((...args: any[]) => void);
 declare class MusicKit {
@@ -180,12 +199,15 @@ declare class MusicKit {
     private readonly session;
     private readonly emitter;
     private readonly searchCache;
+    readonly sources: AudioSource[];
     private _discovery;
     private _stream;
     private _downloader;
     private _ytPromise;
     constructor(config?: MusicKitConfig, _yt?: Innertube);
     static create(config?: MusicKitConfig): Promise<MusicKit>;
+    registerSource(source: AudioSource): void;
+    private sourceFor;
     private ensureClients;
     private call;
     on(event: EventName, handler: EventHandler<typeof event>): void;
@@ -193,28 +215,39 @@ declare class MusicKit {
     autocomplete(query: string): Promise<string[]>;
     search(query: string, options: {
         filter: 'songs';
+        limit?: number;
     }): Promise<Song[]>;
     search(query: string, options: {
         filter: 'albums';
+        limit?: number;
     }): Promise<Album[]>;
     search(query: string, options: {
         filter: 'artists';
+        limit?: number;
     }): Promise<Artist[]>;
     search(query: string, options: {
         filter: 'playlists';
+        limit?: number;
     }): Promise<Playlist[]>;
     search(query: string, options?: {
         filter?: SearchFilter;
+        limit?: number;
     }): Promise<SearchResults>;
     getStream(videoId: string, options?: {
         quality?: Quality;
     }): Promise<StreamingData>;
     getTrack(videoId: string): Promise<AudioTrack>;
-    getHome(): Promise<Section[]>;
+    getHome(options?: {
+        language?: string;
+    }): Promise<Section[]>;
     getArtist(channelId: string): Promise<Artist>;
     getAlbum(browseId: string): Promise<Album>;
+    getPlaylist(playlistId: string): Promise<Playlist>;
     getRadio(videoId: string): Promise<Song[]>;
     getRelated(videoId: string): Promise<Song[]>;
+    getSuggestions(id: string): Promise<Song[]>;
+    getMetadata(id: string): Promise<Song>;
+    getLyrics(id: string): Promise<string | null>;
     getCharts(options?: BrowseOptions): Promise<Section[]>;
     download(videoId: string, options?: DownloadOptions$1): Promise<void>;
 }
@@ -297,10 +330,12 @@ declare class DiscoveryClient {
     autocomplete(query: string): Promise<string[]>;
     search(query: string, options?: {
         filter?: SearchFilter;
-    }): Promise<SearchResults | Song[] | Album[] | Artist[]>;
+        limit?: number;
+    }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]>;
     getHome(): Promise<Section[]>;
     getArtist(channelId: string): Promise<Artist>;
     getAlbum(browseId: string): Promise<Album>;
+    getPlaylist(playlistId: string): Promise<Playlist>;
     getRadio(videoId: string): Promise<Song[]>;
     getRelated(videoId: string): Promise<Song[]>;
     getCharts(options?: {
@@ -335,4 +370,16 @@ declare class Downloader {
     private readWithProgress;
 }
 
-export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, type LogLevel, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail };
+/**
+ * Returns the thumbnail whose width is closest to targetSize.
+ * Falls back to the first thumbnail when all widths are 0.
+ * Returns null for an empty array.
+ */
+declare function getBestThumbnail(thumbnails: Thumbnail[], targetSize: number): Thumbnail | null;
+
+/**
+ * Returns true if the stream URL has expired or will expire within 5 minutes.
+ */
+declare function isStreamExpired(stream: StreamingData): boolean;
+
+export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, type LogLevel, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };

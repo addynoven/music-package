@@ -117,7 +117,7 @@ export class DiscoveryClient {
     )
   }
 
-  async search(query: string, options?: { filter?: SearchFilter }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
+  async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
     const typeMap: Record<SearchFilter, string> = {
       songs: 'song', albums: 'album', artists: 'artist', playlists: 'playlist',
     }
@@ -216,6 +216,24 @@ export class DiscoveryClient {
       year,
       thumbnails: mapThumbnails(header),
       tracks,
+    }
+  }
+
+  async getPlaylist(playlistId: string): Promise<Playlist> {
+    const res = await (this.yt.music as any).getPlaylist(playlistId) as any
+    if (!res) throw new Error(`Playlist not found: ${playlistId}`)
+    const header = res.header ?? {}
+    const tracks: Song[] = (res.contents ?? res.items ?? [])
+      .map((item: any) => item.primary ?? item)
+      .filter((item: any) => item?.video_id || item?.id)
+      .map(mapSongItem)
+    return {
+      type: 'playlist',
+      playlistId,
+      title: extractText(header?.title) || extractText(res.title) || 'Unknown',
+      thumbnails: mapThumbnails(header),
+      songs: tracks,
+      songCount: tracks.length,
     }
   }
 

@@ -41,6 +41,7 @@ export interface Playlist {
   title: string
   thumbnails: Thumbnail[]
   songs?: Song[]
+  songCount?: number
 }
 
 export interface Section {

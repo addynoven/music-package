@@ -9,6 +9,8 @@ import { Downloader } from '../downloader'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
 import { JioSaavnSource } from '../sources/jiosaavn'
+import { resolveInput } from '../utils/url-resolver'
+import { isStreamExpired } from '../utils/stream-utils'
 import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
@@ -132,16 +134,19 @@ export class MusicKit {
 
   async autocomplete(query: string): Promise<string[]> {
     await this.ensureClients()
-    return this.call('autocomplete', () => this._discovery!.autocomplete(query))
+    const resolved = resolveInput(query)
+    if (resolved.startsWith('jio:')) return []
+    return this.call('autocomplete', () => this._discovery!.autocomplete(resolved))
   }
 
-  async search(query: string, options: { filter: 'songs' }): Promise<Song[]>
-  async search(query: string, options: { filter: 'albums' }): Promise<Album[]>
-  async search(query: string, options: { filter: 'artists' }): Promise<Artist[]>
-  async search(query: string, options: { filter: 'playlists' }): Promise<Playlist[]>
-  async search(query: string, options?: { filter?: SearchFilter }): Promise<SearchResults>
-  async search(query: string, options?: { filter?: SearchFilter }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
-    const cacheKey = `search:${query}:${options?.filter ?? 'all'}`
+  async search(query: string, options: { filter: 'songs'; limit?: number }): Promise<Song[]>
+  async search(query: string, options: { filter: 'albums'; limit?: number }): Promise<Album[]>
+  async search(query: string, options: { filter: 'artists'; limit?: number }): Promise<Artist[]>
+  async search(query: string, options: { filter: 'playlists'; limit?: number }): Promise<Playlist[]>
+  async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults>
+  async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
+    const resolved = resolveInput(query)
+    const cacheKey = `search:${resolved}:${options?.filter ?? 'all'}:${options?.limit ?? 'default'}`
 
     const inMemory = this.searchCache.get(cacheKey)
     if (inMemory !== undefined) {
@@ -160,7 +165,7 @@ export class MusicKit {
     await this.limiter.throttle('search', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
-    const result = await this.call('search', () => this.sourceFor(query).search(query, options ?? {}))
+    const result = await this.call('search', () => this.sourceFor(resolved).search(resolved, options ?? {}))
     this.searchCache.set(cacheKey, result as any)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
@@ -168,65 +173,128 @@ export class MusicKit {
 
   async getStream(videoId: string, options?: { quality?: Quality }): Promise<StreamingData> {
     await this.ensureClients()
+    const id = resolveInput(videoId)
     const quality = options?.quality ?? 'high'
-    return this.call('stream', () => this.sourceFor(videoId).getStream(videoId, quality))
+
+    if (id.startsWith('jio:')) {
+      const cacheKey = `stream:${id}:${quality}`
+      const cached = this.cache.get<StreamingData>(cacheKey)
+      if (cached && !isStreamExpired(cached)) return cached
+      const result = await this.call('stream', () => this.sourceFor(id).getStream(id, quality))
+      this.cache.set(cacheKey, result, Cache.TTL.STREAM)
+      return result
+    }
+
+    return this.call('stream', () => this.sourceFor(id).getStream(id, quality))
   }
 
   async getTrack(videoId: string): Promise<AudioTrack> {
     await this.ensureClients()
+    const id = resolveInput(videoId)
+    const src = this.sourceFor(id)
     const [song, streamData] = await Promise.all([
-      this.call('browse', () => this._discovery!.getInfo(videoId)),
-      this.call('stream', () => this.sourceFor(videoId).getStream(videoId, 'high')),
+      id.startsWith('jio:')
+        ? this.call('browse', () => src.getMetadata(id))
+        : this.call('browse', () => this._discovery!.getInfo(id)),
+      this.call('stream', () => src.getStream(id, 'high')),
     ])
     return { ...song, stream: streamData }
   }
 
-  async getHome(): Promise<Section[]> {
+  async getHome(options?: { language?: string }): Promise<Section[]> {
     await this.ensureClients()
     const src = this.sources.find(s => s.getHome)
-    if (src) return this.call('browse', () => src.getHome!())
+    if (src) return this.call('browse', () => src.getHome!(options?.language))
     return this.call('browse', () => this._discovery!.getHome())
   }
 
   async getArtist(channelId: string): Promise<Artist> {
     await this.ensureClients()
-    if (channelId.startsWith('jio:')) {
-      const src = this.sourceFor(channelId)
-      if (src.getArtist) return this.call('browse', () => src.getArtist!(channelId))
+    const id = resolveInput(channelId)
+    if (id.startsWith('jio:')) {
+      const src = this.sourceFor(id)
+      if (src.getArtist) return this.call('browse', () => src.getArtist!(id))
     }
-    return this.call('browse', () => this._discovery!.getArtist(channelId))
+    return this.call('browse', () => this._discovery!.getArtist(id))
   }
 
   async getAlbum(browseId: string): Promise<Album> {
     await this.ensureClients()
-    if (browseId.startsWith('jio:')) {
-      const src = this.sourceFor(browseId)
-      if (src.getAlbum) return this.call('browse', () => src.getAlbum!(browseId))
+    const id = resolveInput(browseId)
+    if (id.startsWith('jio:')) {
+      const src = this.sourceFor(id)
+      if (src.getAlbum) return this.call('browse', () => src.getAlbum!(id))
     }
-    return this.call('browse', () => this._discovery!.getAlbum(browseId))
+    return this.call('browse', () => this._discovery!.getAlbum(id))
   }
 
   async getPlaylist(playlistId: string): Promise<Playlist> {
     await this.ensureClients()
-    if (playlistId.startsWith('jio:')) {
-      const src = this.sourceFor(playlistId)
-      if (src.getPlaylist) return this.call('browse', () => src.getPlaylist!(playlistId))
+    const id = resolveInput(playlistId)
+    if (id.startsWith('jio:')) {
+      const src = this.sourceFor(id)
+      if (src.getPlaylist) return this.call('browse', () => src.getPlaylist!(id))
     }
-    throw new Error(`No source can handle getPlaylist: ${playlistId}`)
+    return this.call('browse', () => this._discovery!.getPlaylist(id))
   }
 
   async getRadio(videoId: string): Promise<Song[]> {
     await this.ensureClients()
-    if (videoId.startsWith('jio:')) {
-      const src = this.sourceFor(videoId)
-      if (src.getRadio) return this.call('browse', () => src.getRadio!(videoId))
+    const id = resolveInput(videoId)
+    if (id.startsWith('jio:')) {
+      const src = this.sourceFor(id)
+      if (src.getRadio) return this.call('browse', () => src.getRadio!(id))
     }
-    return this.call('browse', () => this._discovery!.getRadio(videoId))
+    return this.call('browse', () => this._discovery!.getRadio(id))
   }
 
   async getRelated(videoId: string): Promise<Song[]> {
     await this.ensureClients()
-    return this.call('browse', () => this._discovery!.getRelated(videoId))
+    const id = resolveInput(videoId)
+    return this.call('browse', () => this._discovery!.getRelated(id))
+  }
+
+  async getSuggestions(id: string): Promise<Song[]> {
+    await this.ensureClients()
+    const resolved = resolveInput(id)
+
+    if (resolved.startsWith('jio:')) {
+      const src = this.sourceFor(resolved)
+      try {
+        const meta = await src.getMetadata(resolved)
+        const query = `${meta.title} ${meta.artist}`
+        const ytSongs = await this._discovery!.search(query, { filter: 'songs' }) as Song[]
+        const ytId = ytSongs[0]?.videoId
+        if (ytId) {
+          return await this._discovery!.getRelated(ytId)
+        }
+      } catch {
+        // fall through to JioSaavn radio
+      }
+      if (src.getRadio) return this.call('browse', () => src.getRadio!(resolved))
+      return []
+    }
+
+    return this.call('browse', () => this._discovery!.getRelated(resolved))
+  }
+
+  async getMetadata(id: string): Promise<Song> {
+    await this.ensureClients()
+    const resolved = resolveInput(id)
+    if (resolved.startsWith('jio:')) {
+      return this.call('browse', () => this.sourceFor(resolved).getMetadata(resolved))
+    }
+    return this.call('browse', () => this._discovery!.getInfo(resolved))
+  }
+
+  async getLyrics(id: string): Promise<string | null> {
+    await this.ensureClients()
+    const resolved = resolveInput(id)
+    if (resolved.startsWith('jio:')) {
+      const src = this.sourceFor(resolved)
+      if (src.getLyrics) return src.getLyrics(resolved)
+    }
+    return null
   }
 
   async getCharts(options?: BrowseOptions): Promise<Section[]> {
@@ -236,7 +304,7 @@ export class MusicKit {
 
   async download(videoId: string, options?: DownloadOptions): Promise<void> {
     await this.ensureClients()
-    return this._downloader!.download(videoId, options)
+    return this._downloader!.download(resolveInput(videoId), options)
   }
 }
 

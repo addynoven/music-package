@@ -486,8 +486,17 @@ var DiscoveryClient = class {
     return (res?.contents ?? []).map((item) => item.primary ?? item).filter((item) => item?.video_id || item?.id).map(mapSongItem);
   }
   async getRelated(videoId) {
-    const res = await this.yt.music.getRelated(videoId);
-    return (res?.contents ?? []).flatMap((s) => s.contents ?? []).map(mapSongItem);
+    try {
+      const res = await this.yt.music.getRelated(videoId);
+      return (res?.contents ?? []).flatMap((s) => s.contents ?? []).map(mapSongItem);
+    } catch {
+      try {
+        const res = await this.yt.music.getUpNext(videoId);
+        return (res?.contents ?? []).map(mapSongItem);
+      } catch {
+        return [];
+      }
+    }
   }
   async getCharts(options) {
     const res = await this.yt.music.getExplore?.(options) ?? { sections: [] };
@@ -998,7 +1007,8 @@ var JioSaavnSource = class {
   async getLyrics(id) {
     try {
       const raw = await this.client.getLyrics(stripPrefix(id));
-      return raw.lyrics ?? null;
+      if (!raw.lyrics) return null;
+      return raw.lyrics.replace(/<br\s*\/?>/gi, "\n");
     } catch {
       return null;
     }

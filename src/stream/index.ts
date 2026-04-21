@@ -41,7 +41,8 @@ export class StreamResolver {
   }
 
   async resolve(videoId: string, quality: Quality | { codec?: string; quality?: Quality } = 'high'): Promise<StreamingData> {
-    const q: Quality = typeof quality === 'string' ? quality : (quality.quality ?? 'high')
+    const raw: string = typeof quality === 'string' ? quality : (quality.quality ?? 'high')
+    const q: Quality = raw === 'low' ? 'low' : 'high'
     const cacheKey = `stream:${videoId}:${q}`
 
     const cached = this.cache.get<StreamingData>(cacheKey)

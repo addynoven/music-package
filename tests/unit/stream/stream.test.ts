@@ -183,6 +183,17 @@ describe('StreamResolver', () => {
       expect(result.bitrate).toBeGreaterThanOrEqual(100_000)
     })
 
+    it('defaults to high quality when an unknown quality string is passed', async () => {
+      const highFmt = makeFmt(160_000)
+      const lowFmt = makeFmt(50_000)
+      const localYt = makeYt([highFmt, lowFmt])
+      const localResolver = new StreamResolver(new Cache({ enabled: false }), localYt as any)
+
+      const result = await localResolver.resolve('vid', 'ultra' as any)
+
+      expect(result.bitrate).toBe(160_000)
+    })
+
     it('uses separate cache keys for high vs low quality', async () => {
       const highFmt = makeFmt(160_000)
       const lowFmt = makeFmt(50_000)

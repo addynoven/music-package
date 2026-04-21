@@ -328,5 +328,115 @@ describe('DiscoveryClient', () => {
 
       expect(mockYt.music.getExplore).toHaveBeenCalledWith(expect.objectContaining({ country: 'JP' }))
     })
+
+    it('filters out empty sections with no title and no items', async () => {
+      mockYt.music.getExplore.mockResolvedValue({
+        sections: [
+          { title: { text: 'Top songs' }, contents: [makeSongItem()] },
+          { title: '', contents: [] },
+          { title: { text: '' }, contents: [] },
+        ],
+      })
+
+      const charts = await client.getCharts()
+
+      expect(charts).toHaveLength(1)
+      expect(charts[0].title).toBe('Top songs')
+    })
+  })
+
+  describe('getHome (empty section filtering)', () => {
+    it('filters out empty sections with no title and no items', async () => {
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          { title: { text: 'Quick picks' }, contents: [makeSongItem()] },
+          { title: '', contents: [] },
+          { title: { text: '' }, contents: [] },
+        ],
+      })
+
+      const sections = await client.getHome()
+
+      expect(sections).toHaveLength(1)
+      expect(sections[0].title).toBe('Quick picks')
+    })
+  })
+
+  describe('getAlbum (artist propagation + subtitle parsing)', () => {
+    it('propagates album artist to tracks that have no individual artist field', async () => {
+      mockYt.music.getAlbum.mockResolvedValue({
+        header: {
+          title: { text: 'Arijit Singh Collection' },
+          subtitle: { runs: [null, null, { text: 'Arijit Singh' }, null, { text: '2023' }] },
+          thumbnail: { contents: [] },
+        },
+        contents: [
+          { id: 'track1', title: 'Song One', duration: { seconds: 200 } },
+          { id: 'track2', title: 'Song Two', artists: [], duration: { seconds: 180 } },
+        ],
+      })
+
+      const album = await client.getAlbum('some-id')
+
+      expect(album.tracks[0].artist).toBe('Arijit Singh')
+      expect(album.tracks[1].artist).toBe('Arijit Singh')
+    })
+
+    it('correctly parses year when subtitle structure differs from standard album', async () => {
+      mockYt.music.getAlbum.mockResolvedValue({
+        header: {
+          title: { text: 'Some Compilation' },
+          subtitle: { runs: [{ text: 'Playlist' }, { text: ' • ' }, { text: '2023' }] },
+          thumbnail: { contents: [] },
+        },
+        contents: [],
+      })
+
+      const album = await client.getAlbum('some-id')
+
+      expect(album.year).toBe('2023')
+      expect(album.artist).not.toBe('2023')
+    })
+  })
+
+  describe('getArtist (artist propagation)', () => {
+    it('propagates artist name to songs in artist sections that have no artists field', async () => {
+      mockYt.music.getArtist.mockResolvedValue({
+        header: { title: { text: 'Arijit Singh' } },
+        sections: [
+          {
+            title: { text: 'Songs' },
+            contents: [
+              { id: 'v1', title: 'Song A', duration: { seconds: 180 } },
+              { id: 'v2', title: 'Song B', artists: [], duration: { seconds: 200 } },
+            ],
+          },
+        ],
+      })
+
+      const artist = await client.getArtist('UC_test')
+
+      expect(artist.songs[0].artist).toBe('Arijit Singh')
+      expect(artist.songs[1].artist).toBe('Arijit Singh')
+    })
+  })
+
+  describe('search (playlist filter)', () => {
+    it('returns mapped playlist results when filter is "playlists" and results exist', async () => {
+      const playlistItem = {
+        id: 'PLtest123',
+        title: { text: 'Top Hits Playlist' },
+        thumbnail: { contents: [{ url: 'https://img.example.com/pl.jpg', width: 226, height: 226 }] },
+      }
+      mockYt.music.search.mockResolvedValue({ contents: [{ contents: [playlistItem] }] })
+
+      const result = await client.search('hits', { filter: 'playlists' }) as any[]
+
+      expect(Array.isArray(result)).toBe(true)
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe('playlist')
+      expect(result[0].playlistId).toBe('PLtest123')
+      expect(result[0].title).toBe('Top Hits Playlist')
+    })
   })
 })

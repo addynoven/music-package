@@ -1,5 +1,5 @@
 import type { Innertube } from 'youtubei.js'
-import type { Song, Album, Artist, Section, SearchResults, SearchFilter, Thumbnail } from '../models'
+import type { Song, Album, Artist, Playlist, Section, SearchResults, SearchFilter, Thumbnail } from '../models'
 
 function extractText(value: any): string {
   if (!value) return ''
@@ -21,10 +21,14 @@ function mapThumbnails(item: any): Thumbnail[] {
 }
 
 function mapSongItem(item: any): Song {
-  const artist = extractText(item.artists?.[0]?.name) || extractText(item.author?.name) || 'Unknown Artist'
+  const artist = extractText(item.artists?.[0]?.name) ||
+    extractText(item.authors?.[0]?.name) ||
+    extractText(item.author?.name) ||
+    extractText(item.author) ||  // PlaylistPanelVideo.author is a plain string
+    'Unknown Artist'
   return {
     type: 'song',
-    videoId: item.id ?? '',
+    videoId: item.video_id ?? item.id ?? '',  // PlaylistPanelVideo uses video_id
     title: extractText(item.title) || 'Unknown',
     artist,
     duration: item.duration?.seconds ?? 0,
@@ -57,8 +61,30 @@ function mapArtistItem(item: any): Artist {
   }
 }
 
+function mapPlaylistItem(item: any): Playlist {
+  return {
+    type: 'playlist',
+    playlistId: item.id ?? '',
+    title: extractText(item.title) || 'Unknown',
+    thumbnails: mapThumbnails(item),
+  }
+}
+
 function flatContents(res: any): any[] {
   return (res?.contents ?? []).flatMap((section: any) => section?.contents ?? [])
+}
+
+function isEmptySection(title: string, items: any[]): boolean {
+  return title === '' && items.length === 0
+}
+
+function parseAlbumSubtitle(runs: any[]): { artist: string; year?: string } {
+  const YEAR_RE = /^\d{4}$/
+  const SKIP = new Set(['album', 'single', 'ep', 'playlist', 'compilation', ' • ', '•'])
+  const texts = (runs ?? []).map((r: any) => extractText(r)).filter((t: string) => t && t.trim() !== '' && !SKIP.has(t.toLowerCase().trim()))
+  const year = texts.find((t: string) => YEAR_RE.test(t.trim()))
+  const artist = texts.find((t: string) => !YEAR_RE.test(t.trim()))
+  return { artist: artist ?? 'Unknown Artist', year }
 }
 
 export class DiscoveryClient {
@@ -91,7 +117,7 @@ export class DiscoveryClient {
     )
   }
 
-  async search(query: string, options?: { filter?: SearchFilter }): Promise<SearchResults | Song[] | Album[] | Artist[]> {
+  async search(query: string, options?: { filter?: SearchFilter }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
     const typeMap: Record<SearchFilter, string> = {
       songs: 'song', albums: 'album', artists: 'artist', playlists: 'playlist',
     }
@@ -103,6 +129,7 @@ export class DiscoveryClient {
       if (options.filter === 'songs') return items.map(mapSongItem)
       if (options.filter === 'albums') return items.map(mapAlbumItem)
       if (options.filter === 'artists') return items.map(mapArtistItem)
+      if (options.filter === 'playlists') return items.map(mapPlaylistItem)
       return []
     }
 
@@ -119,10 +146,12 @@ export class DiscoveryClient {
 
   async getHome(): Promise<Section[]> {
     const res = await this.yt.music.getHomeFeed() as any
-    return (res?.sections ?? res?.contents ?? []).map((s: any) => ({
-      title: extractText(s.title) || extractText(s.header?.title) || '',
-      items: (s.contents ?? []).map(mapSongItem),
-    }))
+    return (res?.sections ?? res?.contents ?? [])
+      .map((s: any) => ({
+        title: extractText(s.title) || extractText(s.header?.title) || '',
+        items: (s.contents ?? []).map(mapSongItem),
+      }))
+      .filter((s: Section) => !isEmptySection(s.title, s.items))
   }
 
   async getArtist(channelId: string): Promise<Artist> {
@@ -137,7 +166,10 @@ export class DiscoveryClient {
     for (const section of res.sections ?? []) {
       const contents = section.contents ?? []
       const title = (extractText(section.title) || extractText(section.header?.title) || '').toLowerCase()
-      if (title.includes('song')) songs.push(...contents.map(mapSongItem))
+      if (title.includes('song')) songs.push(...contents.map((item: any) => {
+        const song = mapSongItem(item)
+        return song.artist === 'Unknown Artist' ? { ...song, artist: name } : song
+      }))
       else if (title.includes('single')) singles.push(...contents.map(mapAlbumItem))
       else if (title.includes('album') || title.includes('release')) albums.push(...contents.map(mapAlbumItem))
     }
@@ -157,29 +189,42 @@ export class DiscoveryClient {
     const res = await this.yt.music.getAlbum(browseId) as any
     if (!res) throw new Error(`Album not found: ${browseId}`)
 
-    const tracks = (res.contents ?? []).map((t: any): Song => ({
-      type: 'song',
-      videoId: t.id ?? '',
-      title: extractText(t.title) || 'Unknown',
-      artist: extractText(t.artists?.[0]?.name) || 'Unknown Artist',
-      duration: t.duration?.seconds ?? 0,
-      thumbnails: mapThumbnails(res.header),
-    }))
+    const header = res.header
+    // MusicDetailHeader exposes .year and .author directly — prefer those over subtitle parsing
+    const year: string | undefined = header?.year || parseAlbumSubtitle(header?.subtitle?.runs).year || undefined
+    const artist = extractText(header?.author?.name) ||
+      extractText(header?.strapline_text_one) ||
+      parseAlbumSubtitle(header?.subtitle?.runs).artist
+
+    const tracks = (res.contents ?? []).map((t: any): Song => {
+      const trackArtist = extractText(t.artists?.[0]?.name) || extractText(t.authors?.[0]?.name)
+      return {
+        type: 'song',
+        videoId: t.video_id ?? t.id ?? '',
+        title: extractText(t.title) || 'Unknown',
+        artist: trackArtist || artist,
+        duration: t.duration?.seconds ?? 0,
+        thumbnails: mapThumbnails(header),
+      }
+    })
 
     return {
       type: 'album',
       browseId,
-      title: extractText(res.header?.title) || 'Unknown',
-      artist: res.header?.subtitle?.runs?.[2]?.text ?? 'Unknown Artist',
-      year: res.header?.subtitle?.runs?.[4]?.text,
-      thumbnails: mapThumbnails(res.header),
+      title: extractText(header?.title) || 'Unknown',
+      artist,
+      year,
+      thumbnails: mapThumbnails(header),
       tracks,
     }
   }
 
   async getRadio(videoId: string): Promise<Song[]> {
     const res = await this.yt.music.getUpNext(videoId) as any
-    return (res?.contents ?? []).map(mapSongItem)
+    return (res?.contents ?? [])
+      .map((item: any) => item.primary ?? item)  // unwrap PlaylistPanelVideoWrapper
+      .filter((item: any) => item?.video_id || item?.id)
+      .map(mapSongItem)
   }
 
   async getRelated(videoId: string): Promise<Song[]> {
@@ -189,12 +234,14 @@ export class DiscoveryClient {
 
   async getCharts(options?: { country?: string }): Promise<Section[]> {
     const res = await (this.yt.music as any).getExplore?.(options) ?? { sections: [] }
-    return (res.sections ?? res.contents ?? []).map((s: any) => ({
-      title: extractText(s.title) || extractText(s.header?.title) || '',
-      items: (s.contents ?? []).flatMap((item: any) => {
-        if (item.contents) return item.contents.map(mapSongItem)
-        return [mapSongItem(item)]
-      }),
-    }))
+    return (res.sections ?? res.contents ?? [])
+      .map((s: any) => ({
+        title: extractText(s.title) || extractText(s.header?.title) || '',
+        items: (s.contents ?? []).flatMap((item: any) => {
+          if (item.contents) return item.contents.map(mapSongItem)
+          return [mapSongItem(item)]
+        }),
+      }))
+      .filter((s: Section) => !isEmptySection(s.title, s.items))
   }
 }

@@ -20,7 +20,7 @@ import { RetryEngine } from '../../../src/retry'
 }))
 
 const mockStream = { resolve: vi.fn() }
-const mockDiscovery = { search: vi.fn() }
+const mockDiscovery = { search: vi.fn(), getInfo: vi.fn() }
 
 ;(StreamResolver as any).mockImplementation(() => mockStream)
 ;(DiscoveryClient as any).mockImplementation(() => mockDiscovery)
@@ -90,7 +90,7 @@ describe('MusicKit — getStream & getTrack', () => {
     it('returns an AudioTrack combining song metadata and stream', async () => {
       const song = makeSong({ videoId: 'dQw4w9WgXcQ' })
       const stream = makeStreamingData()
-      mockDiscovery.search.mockResolvedValue([song])
+      mockDiscovery.getInfo.mockResolvedValue(song)
       mockStream.resolve.mockResolvedValue(stream)
 
       const track = await mk.getTrack('dQw4w9WgXcQ')
@@ -109,7 +109,7 @@ describe('MusicKit — getStream & getTrack', () => {
 
     it('resolves the stream in parallel with metadata lookup', async () => {
       // Both should be called — order does not matter, but both must happen
-      mockDiscovery.search.mockResolvedValue([makeSong()])
+      mockDiscovery.getInfo.mockResolvedValue(makeSong())
       mockStream.resolve.mockResolvedValue(makeStreamingData())
 
       await mk.getTrack('dQw4w9WgXcQ')

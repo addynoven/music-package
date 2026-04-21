@@ -7,6 +7,9 @@ import { DiscoveryClient } from '../discovery'
 import { StreamResolver } from '../stream'
 import { Downloader } from '../downloader'
 import { MusicKitEmitter } from '../events'
+import { YouTubeMusicSource } from '../sources/youtube-music'
+import { JioSaavnSource } from '../sources/jiosaavn'
+import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
   MusicKitRequest,
@@ -38,6 +41,7 @@ export class MusicKit {
   private readonly session: SessionManager
   private readonly emitter: MusicKitEmitter
   private readonly searchCache = new Map<string, SearchResults | Song[] | Album[] | Artist[]>()
+  readonly sources: AudioSource[] = []
 
   private _discovery: DiscoveryClient | null = null
   private _stream: StreamResolver | null = null
@@ -75,15 +79,30 @@ export class MusicKit {
     return new MusicKit(config, yt)
   }
 
+  registerSource(source: AudioSource): void {
+    this.sources.push(source)
+  }
+
+  private sourceFor(query: string): AudioSource {
+    const source = this.sources.find(s => s.canHandle(query))
+    if (!source) throw new Error(`No source can handle: ${query}`)
+    return source
+  }
+
   private async ensureClients(): Promise<void> {
-    if (this._discovery) return
-    if (!this._ytPromise) {
-      this._ytPromise = Innertube.create({ generate_session_locally: true })
+    if (!this._discovery) {
+      if (!this._ytPromise) {
+        this._ytPromise = Innertube.create({ generate_session_locally: true })
+      }
+      const yt = await this._ytPromise
+      this._discovery = new DiscoveryClient(yt)
+      this._stream = new StreamResolver(this.cache, yt)
+      this._downloader = new Downloader(this._stream, this._discovery)
     }
-    const yt = await this._ytPromise
-    this._discovery = new DiscoveryClient(yt)
-    this._stream = new StreamResolver(this.cache, yt)
-    this._downloader = new Downloader(this._stream, this._discovery)
+    if (this.sources.length === 0) {
+      this.sources.push(new JioSaavnSource())
+      this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+    }
   }
 
   private async call<T>(endpoint: string, fn: () => Promise<T>): Promise<T> {
@@ -141,7 +160,7 @@ export class MusicKit {
     await this.limiter.throttle('search', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
-    const result = await this.call('search', () => this._discovery!.search(query, options ?? {}))
+    const result = await this.call('search', () => this.sourceFor(query).search(query, options ?? {}))
     this.searchCache.set(cacheKey, result as any)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
@@ -149,35 +168,59 @@ export class MusicKit {
 
   async getStream(videoId: string, options?: { quality?: Quality }): Promise<StreamingData> {
     await this.ensureClients()
-    return this.call('stream', () => this._stream!.resolve(videoId, options?.quality ?? 'high'))
+    const quality = options?.quality ?? 'high'
+    return this.call('stream', () => this.sourceFor(videoId).getStream(videoId, quality))
   }
 
   async getTrack(videoId: string): Promise<AudioTrack> {
     await this.ensureClients()
     const [song, streamData] = await Promise.all([
       this.call('browse', () => this._discovery!.getInfo(videoId)),
-      this.call('stream', () => this._stream!.resolve(videoId, 'high')),
+      this.call('stream', () => this.sourceFor(videoId).getStream(videoId, 'high')),
     ])
     return { ...song, stream: streamData }
   }
 
   async getHome(): Promise<Section[]> {
     await this.ensureClients()
+    const src = this.sources.find(s => s.getHome)
+    if (src) return this.call('browse', () => src.getHome!())
     return this.call('browse', () => this._discovery!.getHome())
   }
 
   async getArtist(channelId: string): Promise<Artist> {
     await this.ensureClients()
+    if (channelId.startsWith('jio:')) {
+      const src = this.sourceFor(channelId)
+      if (src.getArtist) return this.call('browse', () => src.getArtist!(channelId))
+    }
     return this.call('browse', () => this._discovery!.getArtist(channelId))
   }
 
   async getAlbum(browseId: string): Promise<Album> {
     await this.ensureClients()
+    if (browseId.startsWith('jio:')) {
+      const src = this.sourceFor(browseId)
+      if (src.getAlbum) return this.call('browse', () => src.getAlbum!(browseId))
+    }
     return this.call('browse', () => this._discovery!.getAlbum(browseId))
+  }
+
+  async getPlaylist(playlistId: string): Promise<Playlist> {
+    await this.ensureClients()
+    if (playlistId.startsWith('jio:')) {
+      const src = this.sourceFor(playlistId)
+      if (src.getPlaylist) return this.call('browse', () => src.getPlaylist!(playlistId))
+    }
+    throw new Error(`No source can handle getPlaylist: ${playlistId}`)
   }
 
   async getRadio(videoId: string): Promise<Song[]> {
     await this.ensureClients()
+    if (videoId.startsWith('jio:')) {
+      const src = this.sourceFor(videoId)
+      if (src.getRadio) return this.call('browse', () => src.getRadio!(videoId))
+    }
     return this.call('browse', () => this._discovery!.getRadio(videoId))
   }
 

@@ -40,6 +40,7 @@ export interface Playlist {
   playlistId: string
   title: string
   thumbnails: Thumbnail[]
+  songs?: Song[]
 }
 
 export interface Section {

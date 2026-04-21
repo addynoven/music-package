@@ -4,18 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A developer-facing SDK for YouTube Music integration — wraps YouTube's InnerTube API to expose clean search, autocomplete, stream resolution, and download APIs. Targets single-user applications (CLI tools, bots, desktop apps). Dual-language: native Python and Node.js implementations with an identical public API surface.
+A developer-facing SDK for YouTube Music integration — wraps YouTube's InnerTube API to expose clean search, autocomplete, stream resolution, and download APIs. Targets single-user applications (CLI tools, bots, desktop apps).
 
-**Status:** Design/planning phase. `src/`, `examples/`, and `test/` are empty. Design docs live in `docs/`.
+**Status:** Active implementation. Source lives in `src/`, tests in `tests/unit/` and `tests/integration/`, design docs in `docs/`.
 
 ## Commands
 
 ```bash
-pnpm install      # Install deps (package manager is pnpm@10.33.0)
-pnpm test         # Run tests (not yet configured)
+pnpm install                # Install deps (pnpm@10.33.0)
+pnpm build                  # tsup src/index.ts --format cjs,esm --dts --clean
+pnpm typecheck              # tsc --noEmit
+pnpm test                   # vitest run tests/unit --reporter=verbose
+pnpm test:watch             # vitest tests/unit (watch mode)
+pnpm test:coverage          # vitest run tests/unit --coverage
+pnpm test:integration       # RUN_INTEGRATION=1 vitest run (hits real YouTube API)
+pnpm test:all               # vitest run (unit + integration)
+pnpm play                   # tsx playground/download-test.ts
 ```
-
-No build, lint, or test pipeline exists yet — needs to be set up during implementation.
 
 ## Architecture
 

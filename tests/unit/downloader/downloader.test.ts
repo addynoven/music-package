@@ -32,7 +32,8 @@ describe('Downloader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resolver = new (StreamResolver as any)()
-    downloader = new Downloader(resolver as any)
+    const mockDiscovery = { getInfo: vi.fn().mockResolvedValue({ title: 'Test Song', artist: 'Test Artist', videoId: 'dQw4w9WgXcQ', type: 'song', duration: 0, thumbnails: [] }) }
+    downloader = new Downloader(resolver as any, mockDiscovery as any)
     // Stub fetch so fetchAndWrite completes without hitting real network
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

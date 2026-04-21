@@ -13,6 +13,7 @@ export { SearchFilter } from './models'
 export { MusicKitErrorCode } from './models'
 export { getBestThumbnail } from './utils/thumbnails'
 export { isStreamExpired } from './utils/stream-utils'
+export { JIOSAAVN_LANGUAGES } from './sources/jiosaavn'
 
 // Type exports
 export type {

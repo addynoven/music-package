@@ -88,11 +88,17 @@ YouTube lookup fails. Returns globally-accurate suggestions regardless of source
 ```ts
 mk.getHome(options?: { language?: string }): Promise<Section[]>
 ```
-Curated home feed sections. When `language` is provided, uses JioSaavn's
-language-specific trending (`content.getTrending`), new releases (`content.getAlbums`),
-and featured playlists (`content.getFeaturedPlaylists`) endpoints to return
-localized sections. Supported values: `'hindi'`, `'english'`, `'punjabi'`, `'tamil'`,
-`'telugu'`, etc. Without `language`, falls back to the generic browse modules feed.
+Curated home feed with smart source routing:
+
+| `language` value | Source | Content |
+|---|---|---|
+| `undefined` | JioSaavn | Generic browse modules |
+| Indian language (see `JIOSAAVN_LANGUAGES`) | JioSaavn | Language-specific trending, new releases, playlists |
+| Any other language (`'ja'`, `'ko'`, `'es'`, …) | YouTube Music | Home feed in the session locale |
+
+JioSaavn uses `content.getTrending`, `content.getAlbums`, and `content.getFeaturedPlaylists`
+endpoints for localized sections. YouTube Music uses the `hl`/`gl` set at session creation
+via `MusicKit.create({ language, location })`.
 
 ---
 
@@ -100,9 +106,9 @@ localized sections. Supported values: `'hindi'`, `'english'`, `'punjabi'`, `'tam
 ```ts
 mk.getFeaturedPlaylists(options?: { language?: string }): Promise<Playlist[]>
 ```
-JioSaavn curated playlists for a given language. Defaults to `'hindi'` when no
-language is specified. Supported values match `getHome` language values.
-Returns `[]` on error so it is safe to call unconditionally.
+JioSaavn curated playlists for a given language (Indian languages only).
+Defaults to `'hindi'` when no language is specified.
+Returns `[]` for non-Indian languages or on any error — safe to call unconditionally.
 
 ---
 
@@ -202,7 +208,46 @@ mk.off(event: MusicKitEvent, handler: Function): void
 
 ---
 
+## Configuration reference
+
+Key fields on `MusicKitConfig` (all optional):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `language` | `string` | `undefined` | BCP-47 code passed as `hl` to Innertube session — affects YouTube Music language |
+| `location` | `string` | `undefined` | ISO 3166-1 alpha-2 code passed as `gl` to Innertube session — affects YouTube Music region |
+| `rateLimit` | `RateLimitConfig` | see defaults | Requests-per-minute per endpoint |
+| `minRequestGap` | `number` | `100` | Minimum ms between any two requests |
+| `maxRetries` | `number` | `3` | Retry attempts before throwing |
+| `backoffBase` | `number` | `1000` | Base backoff ms |
+| `backoffMax` | `number` | `60000` | Max backoff ms |
+| `cache.enabled` | `boolean` | `true` | Enable SQLite cache |
+| `cache.dir` | `string` | OS temp | Cache database directory |
+| `visitorId` | `string` | auto | Pre-set YouTube visitor ID |
+| `userAgent` | `string` | default | HTTP User-Agent header |
+
+> **Note:** `language`/`location` configure the YouTube Music Innertube session (set once at create time).  
+> JioSaavn language is controlled per-call via `getHome({ language })` and `getFeaturedPlaylists({ language })`.
+
+---
+
 ## Exported utilities
+
+### `JIOSAAVN_LANGUAGES`
+```ts
+JIOSAAVN_LANGUAGES: Set<string>
+```
+The set of language strings that route to JioSaavn in `getHome()`.
+```ts
+import { JIOSAAVN_LANGUAGES } from 'musicstream-sdk'
+
+JIOSAAVN_LANGUAGES.has('hindi')   // true
+JIOSAAVN_LANGUAGES.has('tamil')   // true
+JIOSAAVN_LANGUAGES.has('ja')      // false → routes to YouTube Music
+```
+Contents: `hindi english punjabi tamil telugu kannada malayalam gujarati marathi bengali bhojpuri urdu rajasthani odia assamese haryanvi sindhi`
+
+---
 
 ### `getBestThumbnail(thumbnails, targetSize)`
 ```ts

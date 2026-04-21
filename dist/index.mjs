@@ -1401,6 +1401,7 @@ export {
   DiscoveryClient,
   Downloader,
   HttpError,
+  JIOSAAVN_LANGUAGES,
   MusicKit,
   MusicKitEmitter,
   MusicKitErrorCode,

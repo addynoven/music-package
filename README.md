@@ -166,20 +166,33 @@ const upNext = await mk.getSuggestions(songId)  // Song[]
 ### Browse
 
 ```ts
-// Home feed — curated sections
-const home = await mk.getHome()
-const hindiHome = await mk.getHome({ language: 'hindi' })
-// Language filtering uses JioSaavn trending + new releases endpoints.
-// Supported values: 'hindi', 'english', 'punjabi', 'tamil', 'telugu', etc.
+// Home feed — smart language routing:
+//   Indian language  → JioSaavn  (trending songs/albums/playlists, new releases)
+//   Other language   → YouTube Music  (uses session locale from MusicKit.create)
+//   No language      → JioSaavn  (generic browse modules)
+
+const home        = await mk.getHome()
+const hindiHome   = await mk.getHome({ language: 'hindi' })   // → JioSaavn
+const tamilHome   = await mk.getHome({ language: 'tamil' })   // → JioSaavn
+
+// For non-Indian languages, set locale at create time and pass the same language:
+const mkJP = await MusicKit.create({ language: 'ja', location: 'JP' })
+const jpHome = await mkJP.getHome({ language: 'ja' })          // → YouTube Music
 
 for (const section of home) {
   console.log(section.title)   // "Trending Songs", "New Releases", "Featured Playlists", etc.
   console.log(section.items)   // (Song | Album | Playlist)[]
 }
 
-// Featured playlists — curated playlists for a language
-const playlists = await mk.getFeaturedPlaylists()
+// Featured playlists — JioSaavn curated, Indian languages only
+const playlists      = await mk.getFeaturedPlaylists()
 const tamilPlaylists = await mk.getFeaturedPlaylists({ language: 'tamil' })
+// Returns [] silently for non-Indian languages
+
+// Check the routing list at runtime
+import { JIOSAAVN_LANGUAGES } from 'musicstream-sdk'
+JIOSAAVN_LANGUAGES.has('hindi')  // true  → JioSaavn
+JIOSAAVN_LANGUAGES.has('ja')     // false → YouTube Music
 
 // Artist page
 const artist = await mk.getArtist(channelId)
@@ -429,6 +442,7 @@ Runnable examples for every feature are in [`examples/`](./examples/):
 | [`12-related-and-radio.ts`](./examples/12-related-and-radio.ts) | getSuggestions, getRadio, getRelated |
 | [`13-custom-source.ts`](./examples/13-custom-source.ts) | Writing a custom AudioSource plugin |
 | [`14-lyrics.ts`](./examples/14-lyrics.ts) | getLyrics, lyrics + metadata together |
+| [`15-language-routing.ts`](./examples/15-language-routing.ts) | Language routing — JioSaavn vs YouTube Music, JIOSAAVN_LANGUAGES |
 
 ---
 

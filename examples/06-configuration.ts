@@ -45,6 +45,12 @@ const mkAdvanced = new MusicKit({
   // Override the User-Agent sent with every request
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 
+  // YouTube Music locale — sets hl (language) and gl (country) on the Innertube session.
+  // Affects YT Music home feed, search language, and chart region.
+  // JioSaavn language is per-call via getHome({ language }) — not set here.
+  language: 'ja',   // BCP-47 code (e.g. 'hi', 'ja', 'ko', 'en')
+  location: 'JP',   // ISO 3166-1 alpha-2 code (e.g. 'IN', 'JP', 'US')
+
   // --- Caching ---
 
   cache: {

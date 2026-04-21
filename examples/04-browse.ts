@@ -2,8 +2,7 @@
  * Browse — home feed, artist pages, album pages, playlists, radio, charts.
  *
  * All IDs are opaque — use exactly what came back from search() or other browse calls.
- * getCharts() accepts an optional country code for regional charts.
- * getHome() accepts an optional language for localised content.
+ * getHome() routes to JioSaavn for Indian languages, YouTube Music for everything else.
  */
 
 import { MusicKit } from 'musicstream-sdk'
@@ -14,17 +13,17 @@ const mk = new MusicKit()
 async function main() {
   // --- Home feed ---
   //
-  // Returns curated sections: "New Trending", "New Albums", "Charts", etc.
-  // Pass a language to get localised content (default: source decides).
-  // Items in each section are Song | Album | Playlist — discriminate by item.type
-
+  // No language → JioSaavn generic browse modules
   const home: Section[] = await mk.getHome()
 
-  // Hindi feed
-  const hindiHome: Section[] = await mk.getHome({ language: 'hindi' })
-
-  // Punjabi feed
+  // Indian language → JioSaavn language-specific trending + new releases + playlists
+  const hindiHome: Section[]   = await mk.getHome({ language: 'hindi' })
   const punjabiHome: Section[] = await mk.getHome({ language: 'punjabi' })
+  const tamilHome: Section[]   = await mk.getHome({ language: 'tamil' })
+
+  // Non-Indian language → YouTube Music (uses session locale set at create time)
+  const mkJapan = await MusicKit.create({ language: 'ja', location: 'JP' })
+  const japaneseHome: Section[] = await mkJapan.getHome({ language: 'ja' })
 
   for (const section of home) {
     console.log(`\n== ${section.title} ==`)
@@ -34,6 +33,14 @@ async function main() {
       if (item.type === 'playlist') console.log(`  Playlist: ${item.title}`)
     }
   }
+
+  // --- Featured playlists (JioSaavn curated, Indian languages only) ---
+
+  const hindiPlaylists = await mk.getFeaturedPlaylists({ language: 'hindi' })
+  const tamilPlaylists = await mk.getFeaturedPlaylists({ language: 'tamil' })
+  // Returns [] silently for non-Indian languages
+
+  console.log('Hindi playlists:', hindiPlaylists.map(p => p.title))
 
   // --- Artist page ---
 
@@ -46,7 +53,6 @@ async function main() {
   console.log(artist.albums)       // Album[]
   console.log(artist.singles)      // Album[]
 
-  // Stream any of the artist's songs directly
   if (artist.songs.length > 0) {
     const stream = await mk.getStream(artist.songs[0].videoId)
     console.log(stream.url)
@@ -66,15 +72,13 @@ async function main() {
   console.log(stream.url)
 
   // --- Playlist page ---
-  //
-  // Works with any playlist ID — from search results or a music platform URL.
 
   const playlists = await mk.search('bollywood hits', { filter: 'playlists' })
   const playlist: Playlist = await mk.getPlaylist(playlists[0].playlistId)
 
   console.log(playlist.title)      // "Bollywood Top 50"
   console.log(playlist.songCount)  // total track count
-  console.log(playlist.songs)      // Song[] — loaded tracks
+  console.log(playlist.songs)      // Song[]
 
   if (playlist.songs && playlist.songs.length > 0) {
     const firstStream = await mk.getStream(playlist.songs[0].videoId)
@@ -89,12 +93,11 @@ async function main() {
 
   // --- Related songs ---
 
-  const related: Song[] = await mk.getRelated('fJ9rUzIMcZQ')  // YouTube video ID
+  const related: Song[] = await mk.getRelated('fJ9rUzIMcZQ')
   console.log(related.map(s => s.title))
 
   // --- Charts ---
 
-  const usCharts: Section[] = await mk.getCharts({ country: 'US' })
   const globalCharts: Section[] = await mk.getCharts()
 }
 

@@ -246,8 +246,17 @@ export class DiscoveryClient {
   }
 
   async getRelated(videoId: string): Promise<Song[]> {
-    const res = await this.yt.music.getRelated(videoId) as any
-    return (res?.contents ?? []).flatMap((s: any) => s.contents ?? []).map(mapSongItem)
+    try {
+      const res = await this.yt.music.getRelated(videoId) as any
+      return (res?.contents ?? []).flatMap((s: any) => s.contents ?? []).map(mapSongItem)
+    } catch {
+      try {
+        const res = await this.yt.music.getUpNext(videoId) as any
+        return (res?.contents ?? []).map(mapSongItem)
+      } catch {
+        return []
+      }
+    }
   }
 
   async getCharts(options?: { country?: string }): Promise<Section[]> {

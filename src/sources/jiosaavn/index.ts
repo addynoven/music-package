@@ -250,7 +250,8 @@ export class JioSaavnSource implements AudioSource {
   async getLyrics(id: string): Promise<string | null> {
     try {
       const raw = await this.client.getLyrics(stripPrefix(id))
-      return raw.lyrics ?? null
+      if (!raw.lyrics) return null
+      return raw.lyrics.replace(/<br\s*\/?>/gi, '\n')
     } catch {
       return null
     }

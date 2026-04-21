@@ -1,0 +1,328 @@
+{
+  "summary": {
+    "total_probed": 47,
+    "working": [
+      "artist.getArtistMoreSong",
+      "autocomplete.get",
+      "content.getAlbums",
+      "content.getBrowseModules",
+      "content.getCharts",
+      "content.getFeaturedPlaylists",
+      "content.getTrending",
+      "webapi.getBrowseHoverDetails"
+    ],
+    "needs_params": [],
+    "errors": [
+      "album.getAlbum",
+      "artist.getArtistMoreAlbum",
+      "artist.getArtistPageDetails",
+      "content.getNewAlbums",
+      "content.getNewReleases",
+      "content.getPlaylists",
+      "content.getSongs",
+      "content.getTopAlbums",
+      "content.getTopArtists",
+      "content.getTopSongs",
+      "facebook.com",
+      "gapi.iframes",
+      "github.com",
+      "google.com",
+      "lyrics.getLyrics",
+      "playlist.getFeaturedPlaylists",
+      "playlist.getPlaylist",
+      "radio.createArtistStation",
+      "radio.createEntityStation",
+      "radio.createFeaturedStation",
+      "radio.getSong",
+      "reco.getAlbumReco",
+      "reco.getPlaylistReco",
+      "reco.getSongReco",
+      "reco.getreco",
+      "search.getAlbumResults",
+      "search.getArtistResults",
+      "search.getPlaylistResults",
+      "search.getResults",
+      "search.getSongResults",
+      "search.getTopResults",
+      "song.generateAuthToken",
+      "song.getDetails",
+      "song.getLyrics",
+      "sources.length",
+      "twitter.com",
+      "webapi.get",
+      "webapi.getFooterDetails",
+      "webapi.getLyrics"
+    ]
+  },
+  "endpoints": {
+    "album.getAlbum": {
+      "status": "api_error",
+      "call": "album.getAlbum",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getAlbum operation is not supported'"
+    },
+    "artist.getArtistMoreAlbum": {
+      "status": "api_error",
+      "call": "artist.getArtistMoreAlbum",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:a"
+    },
+    "artist.getArtistMoreSong": {
+      "status": "ok",
+      "call": "artist.getArtistMoreSong",
+      "preview": "{\"artistId\":\"\",\"name\":null,\"image\":\"https:\\/\\/static.saavncdn.com\\/_i\\/share-image-2.png\",\"follower_count\":\"\",\"type\":\"ar"
+    },
+    "artist.getArtistPageDetails": {
+      "status": "api_error",
+      "call": "artist.getArtistPageDetails",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:a"
+    },
+    "autocomplete.get": {
+      "status": "ok",
+      "call": "autocomplete.get",
+      "preview": "[]"
+    },
+    "content.getAlbums": {
+      "status": "ok",
+      "call": "content.getAlbums",
+      "preview": "{\"data\":[{\"id\":\"-2zRg4xU\",\"title\":\"Aitbaar (From &quot;Chand Mera Dil&quot;)\",\"subtitle\":\"Amitabh Bhattacharya - Aitbaar"
+    },
+    "content.getBrowseModules": {
+      "status": "ok",
+      "call": "content.getBrowseModules",
+      "preview": "{\"radio\":{\"featured_stations\":[{\"id\":\"Hindustani Sangeet\",\"title\":\"Hindustani Sangeet\",\"subtitle\":\"Hindi Radio\",\"type\":\""
+    },
+    "content.getCharts": {
+      "status": "ok",
+      "call": "content.getCharts",
+      "preview": "[{\"id\":\"1134543272\",\"image\":\"https:\\/\\/c.saavncdn.com\\/editorial\\/Hindi-IndiaSuperhitsTop50_20260417030701.jpg\",\"title\":"
+    },
+    "content.getFeaturedPlaylists": {
+      "status": "ok",
+      "call": "content.getFeaturedPlaylists",
+      "preview": "{\"data\":[{\"id\":\"158223987\",\"title\":\"Chill Maaro\",\"subtitle\":\"Just Updated\",\"type\":\"playlist\",\"image\":\"https:\\/\\/c.saavnc"
+    },
+    "content.getNewAlbums": {
+      "status": "api_error",
+      "call": "content.getNewAlbums",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getNewAlbums operation is not suppor"
+    },
+    "content.getNewReleases": {
+      "status": "api_error",
+      "call": "content.getNewReleases",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getNewReleases operation is not supp"
+    },
+    "content.getPlaylists": {
+      "status": "api_error",
+      "call": "content.getPlaylists",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getPlaylists operation is not suppor"
+    },
+    "content.getSongs": {
+      "status": "api_error",
+      "call": "content.getSongs",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getSongs operation is not supported'"
+    },
+    "content.getTopAlbums": {
+      "status": "api_error",
+      "call": "content.getTopAlbums",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getTopAlbums operation is not suppor"
+    },
+    "content.getTopArtists": {
+      "status": "api_error",
+      "call": "content.getTopArtists",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getTopArtists operation is not suppo"
+    },
+    "content.getTopSongs": {
+      "status": "api_error",
+      "call": "content.getTopSongs",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getTopSongs operation is not support"
+    },
+    "content.getTrending": {
+      "status": "ok",
+      "call": "content.getTrending",
+      "preview": "[{\"id\":\"83794498\",\"title\":\"Meri Maa\",\"subtitle\":\"104.1K Fans\",\"header_desc\":\"\",\"type\":\"playlist\",\"perma_url\":\"https:\\/\\/"
+    },
+    "facebook.com": {
+      "status": "api_error",
+      "call": "facebook.com",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'com operation is not supported'}}"
+    },
+    "gapi.iframes": {
+      "status": "api_error",
+      "call": "gapi.iframes",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'iframes operation is not supported'}"
+    },
+    "github.com": {
+      "status": "api_error",
+      "call": "github.com",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'com operation is not supported'}}"
+    },
+    "google.com": {
+      "status": "api_error",
+      "call": "google.com",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'com operation is not supported'}}"
+    },
+    "lyrics.getLyrics": {
+      "status": "api_error",
+      "call": "lyrics.getLyrics",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:l"
+    },
+    "playlist.getFeaturedPlaylists": {
+      "status": "api_error",
+      "call": "playlist.getFeaturedPlaylists",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:o"
+    },
+    "playlist.getPlaylist": {
+      "status": "api_error",
+      "call": "playlist.getPlaylist",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getPlaylist operation is not support"
+    },
+    "radio.createArtistStation": {
+      "status": "api_error",
+      "call": "radio.createArtistStation",
+      "msg": "{'error': {'code': 'LOGIN_REQUIRED', 'msg': 'Login required to call this API.'}}"
+    },
+    "radio.createEntityStation": {
+      "status": "api_error",
+      "call": "radio.createEntityStation",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'createEntityStation operation is not"
+    },
+    "radio.createFeaturedStation": {
+      "status": "api_error",
+      "call": "radio.createFeaturedStation",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'createFeaturedStation operation is n"
+    },
+    "radio.getSong": {
+      "status": "api_error",
+      "call": "radio.getSong",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:s"
+    },
+    "reco.getAlbumReco": {
+      "status": "api_error",
+      "call": "reco.getAlbumReco",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:a"
+    },
+    "reco.getPlaylistReco": {
+      "status": "api_error",
+      "call": "reco.getPlaylistReco",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:l"
+    },
+    "reco.getSongReco": {
+      "status": "api_error",
+      "call": "reco.getSongReco",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getSongReco operation is not support"
+    },
+    "reco.getreco": {
+      "status": "api_error",
+      "call": "reco.getreco",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:p"
+    },
+    "search.getAlbumResults": {
+      "status": "api_error",
+      "call": "search.getAlbumResults",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:q"
+    },
+    "search.getArtistResults": {
+      "status": "api_error",
+      "call": "search.getArtistResults",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:q"
+    },
+    "search.getPlaylistResults": {
+      "status": "api_error",
+      "call": "search.getPlaylistResults",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:q"
+    },
+    "search.getResults": {
+      "status": "api_error",
+      "call": "search.getResults",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:q"
+    },
+    "search.getSongResults": {
+      "status": "api_error",
+      "call": "search.getSongResults",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getSongResults operation is not supp"
+    },
+    "search.getTopResults": {
+      "status": "api_error",
+      "call": "search.getTopResults",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getTopResults operation is not suppo"
+    },
+    "song.generateAuthToken": {
+      "status": "api_error",
+      "call": "song.generateAuthToken",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:u"
+    },
+    "song.getDetails": {
+      "status": "api_error",
+      "call": "song.getDetails",
+      "msg": "{'status': 'failure', 'msg': 'something went wrong'}"
+    },
+    "song.getLyrics": {
+      "status": "api_error",
+      "call": "song.getLyrics",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getLyrics operation is not supported"
+    },
+    "sources.length": {
+      "status": "api_error",
+      "call": "sources.length",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'length operation is not supported'}}"
+    },
+    "twitter.com": {
+      "status": "api_error",
+      "call": "twitter.com",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'com operation is not supported'}}"
+    },
+    "webapi.get": {
+      "status": "api_error",
+      "call": "webapi.get",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:t"
+    },
+    "webapi.getBrowseHoverDetails": {
+      "status": "ok",
+      "call": "webapi.getBrowseHoverDetails",
+      "preview": "{\"mega_menu\":{\"top_artists\":[{\"title\":\"Arijit Singh\",\"perma_url\":\"https:\\/\\/www.jiosaavn.com\\/artist\\/arijit-singh-songs"
+    },
+    "webapi.getFooterDetails": {
+      "status": "api_error",
+      "call": "webapi.getFooterDetails",
+      "msg": "{'error': {'code': 'INPUT_MISSING', 'msg': 'One or more required field missing:l"
+    },
+    "webapi.getLyrics": {
+      "status": "api_error",
+      "call": "webapi.getLyrics",
+      "msg": "{'error': {'code': 'INPUT_INVALID', 'msg': 'getLyrics operation is not supported"
+    }
+  },
+  "language_support": {
+    "artist.getArtistMoreSong": {
+      "all_ok": true,
+      "actually_differs": false
+    },
+    "autocomplete.get": {
+      "all_ok": true,
+      "actually_differs": false
+    },
+    "content.getAlbums": {
+      "all_ok": true,
+      "actually_differs": true
+    },
+    "content.getBrowseModules": {
+      "all_ok": true,
+      "actually_differs": false
+    },
+    "content.getCharts": {
+      "all_ok": true,
+      "actually_differs": false
+    },
+    "content.getFeaturedPlaylists": {
+      "all_ok": true,
+      "actually_differs": true
+    },
+    "content.getTrending": {
+      "all_ok": true,
+      "actually_differs": false
+    },
+    "webapi.getBrowseHoverDetails": {
+      "all_ok": true,
+      "actually_differs": false
+    }
+  }
+}

@@ -8,7 +8,7 @@ import { StreamResolver } from '../stream'
 import { Downloader } from '../downloader'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
-import { JioSaavnSource } from '../sources/jiosaavn'
+import { JioSaavnSource, JIOSAAVN_LANGUAGES } from '../sources/jiosaavn'
 import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
 import type { AudioSource } from '../sources/audio-source'
@@ -213,8 +213,12 @@ export class MusicKit {
 
   async getHome(options?: { language?: string }): Promise<Section[]> {
     await this.ensureClients()
-    const src = this.sources.find(s => s.getHome)
-    if (src) return this.call('browse', () => src.getHome!(options?.language))
+    const lang = options?.language
+    const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang)
+    if (useJio) {
+      const src = this.sources.find(s => s.getHome)
+      if (src) return this.call('browse', () => src.getHome!(lang))
+    }
     return this.call('browse', () => this._discovery!.getHome())
   }
 

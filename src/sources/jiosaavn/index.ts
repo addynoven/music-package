@@ -8,6 +8,12 @@ const YOUTUBE_URL_RE = /youtube\.com|youtu\.be/
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/
 const IMAGE_SIZES = ['50x50', '150x150', '500x500']
 
+export const JIOSAAVN_LANGUAGES = new Set([
+  'hindi', 'english', 'punjabi', 'tamil', 'telugu', 'kannada',
+  'malayalam', 'gujarati', 'marathi', 'bengali', 'bhojpuri',
+  'urdu', 'rajasthani', 'odia', 'assamese', 'haryanvi', 'sindhi',
+])
+
 function keyToTitle(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }

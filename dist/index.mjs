@@ -762,6 +762,25 @@ var DefaultJioSaavnClient = class {
 var YOUTUBE_URL_RE = /youtube\.com|youtu\.be/;
 var YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 var IMAGE_SIZES = ["50x50", "150x150", "500x500"];
+var JIOSAAVN_LANGUAGES = /* @__PURE__ */ new Set([
+  "hindi",
+  "english",
+  "punjabi",
+  "tamil",
+  "telugu",
+  "kannada",
+  "malayalam",
+  "gujarati",
+  "marathi",
+  "bengali",
+  "bhojpuri",
+  "urdu",
+  "rajasthani",
+  "odia",
+  "assamese",
+  "haryanvi",
+  "sindhi"
+]);
 function keyToTitle(key) {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -1247,8 +1266,12 @@ var MusicKit = class _MusicKit {
   }
   async getHome(options) {
     await this.ensureClients();
-    const src = this.sources.find((s) => s.getHome);
-    if (src) return this.call("browse", () => src.getHome(options?.language));
+    const lang = options?.language;
+    const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang);
+    if (useJio) {
+      const src = this.sources.find((s) => s.getHome);
+      if (src) return this.call("browse", () => src.getHome(lang));
+    }
     return this.call("browse", () => this._discovery.getHome());
   }
   async getFeaturedPlaylists(options) {

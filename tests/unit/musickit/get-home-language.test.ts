@@ -18,12 +18,13 @@ import { DiscoveryClient } from '../../../src/discovery'
   execute: vi.fn().mockImplementation((fn: Function) => fn()),
 }))
 
-const mockGetHome = vi.fn().mockResolvedValue([makeSection()])
+const mockJioGetHome = vi.fn().mockResolvedValue([makeSection()])
+const mockYtGetHome = vi.fn().mockResolvedValue([makeSection({ title: 'YT Home' })])
 
 ;(DiscoveryClient as any).mockImplementation(() => ({
   autocomplete: vi.fn().mockResolvedValue([]),
   search: vi.fn().mockResolvedValue({ songs: [], albums: [], artists: [], playlists: [] }),
-  getHome: vi.fn().mockResolvedValue([makeSection()]),
+  getHome: mockYtGetHome,
 }))
 
 const mockJioSaavnSource = {
@@ -32,32 +33,75 @@ const mockJioSaavnSource = {
   search: vi.fn(),
   getStream: vi.fn(),
   getMetadata: vi.fn(),
-  getHome: mockGetHome,
+  getHome: mockJioGetHome,
 }
 
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => mockJioSaavnSource),
-}))
+vi.mock('../../../src/sources/jiosaavn', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/sources/jiosaavn')>()
+  return {
+    ...actual,
+    JioSaavnSource: vi.fn().mockImplementation(() => mockJioSaavnSource),
+  }
+})
 
 beforeEach(() => vi.clearAllMocks())
 
-describe('MusicKit — getHome with language option', () => {
-  it('passes language to JioSaavn getHome when provided', async () => {
-    const mk = new MusicKit()
-    await mk.getHome({ language: 'punjabi' })
-    expect(mockGetHome).toHaveBeenCalledWith('punjabi')
+describe('MusicKit — getHome language routing', () => {
+  describe('JioSaavn languages (Indian)', () => {
+    it('routes hindi to JioSaavn', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'hindi' })
+      expect(mockJioGetHome).toHaveBeenCalledWith('hindi')
+      expect(mockYtGetHome).not.toHaveBeenCalled()
+    })
+
+    it('routes punjabi to JioSaavn', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'punjabi' })
+      expect(mockJioGetHome).toHaveBeenCalledWith('punjabi')
+    })
+
+    it('routes tamil to JioSaavn', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'tamil' })
+      expect(mockJioGetHome).toHaveBeenCalledWith('tamil')
+    })
+
+    it('routes telugu to JioSaavn', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'telugu' })
+      expect(mockJioGetHome).toHaveBeenCalledWith('telugu')
+    })
   })
 
-  it('passes default language when no option given', async () => {
-    const mk = new MusicKit()
-    await mk.getHome()
-    expect(mockGetHome).toHaveBeenCalledWith(undefined)
+  describe('non-JioSaavn languages', () => {
+    it('routes japanese to YouTube Music (skips JioSaavn)', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'ja' })
+      expect(mockJioGetHome).not.toHaveBeenCalled()
+      expect(mockYtGetHome).toHaveBeenCalled()
+    })
+
+    it('routes korean to YouTube Music', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'ko' })
+      expect(mockJioGetHome).not.toHaveBeenCalled()
+      expect(mockYtGetHome).toHaveBeenCalled()
+    })
+
+    it('routes spanish to YouTube Music', async () => {
+      const mk = new MusicKit()
+      await mk.getHome({ language: 'es' })
+      expect(mockJioGetHome).not.toHaveBeenCalled()
+      expect(mockYtGetHome).toHaveBeenCalled()
+    })
   })
 
-  it('returns sections from the source', async () => {
-    const mk = new MusicKit()
-    const sections = await mk.getHome({ language: 'hindi' })
-    expect(Array.isArray(sections)).toBe(true)
-    expect(sections.length).toBeGreaterThan(0)
+  describe('no language option', () => {
+    it('uses JioSaavn (default source) when no language given', async () => {
+      const mk = new MusicKit()
+      await mk.getHome()
+      expect(mockJioGetHome).toHaveBeenCalledWith(undefined)
+    })
   })
 })

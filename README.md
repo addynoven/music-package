@@ -169,13 +169,17 @@ const upNext = await mk.getSuggestions(songId)  // Song[]
 // Home feed — curated sections
 const home = await mk.getHome()
 const hindiHome = await mk.getHome({ language: 'hindi' })
-// Note: language option is currently a no-op — JioSaavn's browse endpoint
-// returns the same content regardless of the value passed.
+// Language filtering uses JioSaavn trending + new releases endpoints.
+// Supported values: 'hindi', 'english', 'punjabi', 'tamil', 'telugu', etc.
 
 for (const section of home) {
-  console.log(section.title)   // "New Trending", "Charts", etc.
+  console.log(section.title)   // "Trending Songs", "New Releases", "Featured Playlists", etc.
   console.log(section.items)   // (Song | Album | Playlist)[]
 }
+
+// Featured playlists — curated playlists for a language
+const playlists = await mk.getFeaturedPlaylists()
+const tamilPlaylists = await mk.getFeaturedPlaylists({ language: 'tamil' })
 
 // Artist page
 const artist = await mk.getArtist(channelId)

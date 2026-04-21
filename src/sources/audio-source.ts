@@ -11,5 +11,6 @@ export interface AudioSource {
   getPlaylist?(id: string): Promise<Playlist>
   getRadio?(id: string): Promise<Song[]>
   getHome?(language?: string): Promise<Section[]>
+  getFeaturedPlaylists?(language?: string): Promise<Playlist[]>
   getLyrics?(id: string): Promise<string | null>
 }

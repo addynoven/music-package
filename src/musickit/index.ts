@@ -208,6 +208,13 @@ export class MusicKit {
     return this.call('browse', () => this._discovery!.getHome())
   }
 
+  async getFeaturedPlaylists(options?: { language?: string }): Promise<Playlist[]> {
+    await this.ensureClients()
+    const src = this.sources.find(s => s.getFeaturedPlaylists)
+    if (src) return this.call('browse', () => src.getFeaturedPlaylists!(options?.language))
+    return []
+  }
+
   async getArtist(channelId: string): Promise<Artist> {
     await this.ensureClients()
     const id = resolveInput(channelId)

@@ -187,6 +187,7 @@ interface AudioSource {
     getPlaylist?(id: string): Promise<Playlist>;
     getRadio?(id: string): Promise<Song[]>;
     getHome?(language?: string): Promise<Section[]>;
+    getFeaturedPlaylists?(language?: string): Promise<Playlist[]>;
     getLyrics?(id: string): Promise<string | null>;
 }
 
@@ -240,6 +241,9 @@ declare class MusicKit {
     getHome(options?: {
         language?: string;
     }): Promise<Section[]>;
+    getFeaturedPlaylists(options?: {
+        language?: string;
+    }): Promise<Playlist[]>;
     getArtist(channelId: string): Promise<Artist>;
     getAlbum(browseId: string): Promise<Album>;
     getPlaylist(playlistId: string): Promise<Playlist>;

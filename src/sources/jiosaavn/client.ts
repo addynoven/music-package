@@ -133,6 +133,18 @@ export interface RawLyricsResponse {
   id?: string
 }
 
+export interface RawTrendingResponse {
+  data: Array<RawSong & RawAlbumResult & RawPlaylistResult & { type?: string }>
+}
+
+export interface RawFeaturedPlaylistsResponse {
+  data: RawPlaylistResult[]
+}
+
+export interface RawNewReleasesResponse {
+  data: RawAlbumResult[]
+}
+
 export interface JioSaavnClient {
   searchSongs(query: string, page: number, limit: number): Promise<RawSearchResponse<RawSong>>
   searchAlbums(query: string, page: number, limit: number): Promise<RawSearchResponse<RawAlbumResult>>
@@ -146,6 +158,9 @@ export interface JioSaavnClient {
   createEntityStation(songId: string): Promise<RawStationResponse>
   getRadioSongs(stationId: string, limit?: number): Promise<RawRadioSongsResponse>
   getHome(language?: string): Promise<RawBrowseModulesResponse>
+  getTrending(entityType: 'song' | 'album' | 'playlist', language: string, limit?: number): Promise<RawTrendingResponse>
+  getFeaturedPlaylists(language: string, limit?: number): Promise<RawFeaturedPlaylistsResponse>
+  getNewReleases(language: string, limit?: number): Promise<RawNewReleasesResponse>
   getLyrics(id: string): Promise<RawLyricsResponse>
 }
 
@@ -206,6 +221,18 @@ export class DefaultJioSaavnClient implements JioSaavnClient {
 
   async getHome(language = 'hindi'): Promise<RawBrowseModulesResponse> {
     return jioFetch(`__call=content.getBrowseModules&language=${encodeURIComponent(language)}`)
+  }
+
+  async getTrending(entityType: 'song' | 'album' | 'playlist', language: string, limit = 20): Promise<RawTrendingResponse> {
+    return jioFetch(`__call=content.getTrending&entity_type=${entityType}&entity_language=${encodeURIComponent(language)}&n=${limit}`)
+  }
+
+  async getFeaturedPlaylists(language: string, limit = 20): Promise<RawFeaturedPlaylistsResponse> {
+    return jioFetch(`__call=content.getFeaturedPlaylists&fetch_from_serialized_files=true&p=1&n=${limit}&languages=${encodeURIComponent(language)}`)
+  }
+
+  async getNewReleases(language: string, limit = 20): Promise<RawNewReleasesResponse> {
+    return jioFetch(`__call=content.getAlbums&p=1&n=${limit}&languages=${encodeURIComponent(language)}`)
   }
 
   async getLyrics(id: string): Promise<RawLyricsResponse> {

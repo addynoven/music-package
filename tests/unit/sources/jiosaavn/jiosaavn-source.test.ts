@@ -182,6 +182,10 @@ function makeClient() {
     createEntityStation: vi.fn().mockResolvedValue({ stationid: 'station123' }),
     getRadioSongs: vi.fn().mockResolvedValue(makeRawRadioResponse()),
     getHome: vi.fn().mockResolvedValue(makeRawBrowseModules()),
+    getTrending: vi.fn().mockResolvedValue({ data: [] }),
+    getFeaturedPlaylists: vi.fn().mockResolvedValue({ data: [] }),
+    getNewReleases: vi.fn().mockResolvedValue({ data: [] }),
+    getLyrics: vi.fn().mockResolvedValue({ lyrics: '' }),
   } satisfies JioSaavnClient & Record<string, ReturnType<typeof vi.fn>>
 }
 
@@ -626,9 +630,12 @@ describe('JioSaavnSource', () => {
       expect(Array.isArray(sections[0].items)).toBe(true)
     })
 
-    it('passes language to client.getHome when provided', async () => {
+    it('uses language-specific endpoints when language is provided', async () => {
       await source.getHome!('hindi')
-      expect(client.getHome).toHaveBeenCalledWith('hindi')
+      expect(client.getTrending).toHaveBeenCalled()
+      expect(client.getFeaturedPlaylists).toHaveBeenCalled()
+      expect(client.getNewReleases).toHaveBeenCalled()
+      expect(client.getHome).not.toHaveBeenCalled()
     })
   })
 })

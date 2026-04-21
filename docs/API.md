@@ -88,9 +88,21 @@ YouTube lookup fails. Returns globally-accurate suggestions regardless of source
 ```ts
 mk.getHome(options?: { language?: string }): Promise<Section[]>
 ```
-Curated home feed sections. `language` is accepted but currently has no effect —
-JioSaavn's `getBrowseModules` endpoint returns the same content regardless of the
-value passed. The option is kept for future compatibility.
+Curated home feed sections. When `language` is provided, uses JioSaavn's
+language-specific trending (`content.getTrending`), new releases (`content.getAlbums`),
+and featured playlists (`content.getFeaturedPlaylists`) endpoints to return
+localized sections. Supported values: `'hindi'`, `'english'`, `'punjabi'`, `'tamil'`,
+`'telugu'`, etc. Without `language`, falls back to the generic browse modules feed.
+
+---
+
+### `getFeaturedPlaylists(options?)`
+```ts
+mk.getFeaturedPlaylists(options?: { language?: string }): Promise<Playlist[]>
+```
+JioSaavn curated playlists for a given language. Defaults to `'hindi'` when no
+language is specified. Supported values match `getHome` language values.
+Returns `[]` on error so it is safe to call unconditionally.
 
 ---
 

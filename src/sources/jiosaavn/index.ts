@@ -258,7 +258,10 @@ export class JioSaavnSource implements AudioSource {
   }
 
   async getHome(language?: string): Promise<Section[]> {
-    const raw = await this.client.getHome(language)
+    if (language) {
+      return this.getLanguageHome(language)
+    }
+    const raw = await this.client.getHome()
     const sections: Section[] = []
     for (const [key, val] of Object.entries(raw)) {
       if (!Array.isArray(val) || val.length === 0) continue
@@ -274,5 +277,45 @@ export class JioSaavnSource implements AudioSource {
       }
     }
     return sections
+  }
+
+  private async getLanguageHome(language: string): Promise<Section[]> {
+    const [trendingSongs, trendingAlbums, trendingPlaylists, featuredPlaylists, newReleases] =
+      await Promise.allSettled([
+        this.client.getTrending('song', language),
+        this.client.getTrending('album', language),
+        this.client.getTrending('playlist', language),
+        this.client.getFeaturedPlaylists(language),
+        this.client.getNewReleases(language),
+      ])
+
+    const sections: Section[] = []
+
+    const songs = trendingSongs.status === 'fulfilled' ? (trendingSongs.value.data ?? []).map(mapSong) : []
+    if (songs.length) sections.push({ title: 'Trending Songs', items: songs })
+
+    const albums = trendingAlbums.status === 'fulfilled' ? (trendingAlbums.value.data ?? []).map(mapAlbum) : []
+    if (albums.length) sections.push({ title: 'Trending Albums', items: albums })
+
+    const releases = newReleases.status === 'fulfilled' ? (newReleases.value.data ?? []).map(mapAlbum) : []
+    if (releases.length) sections.push({ title: 'New Releases', items: releases })
+
+    const playlists = trendingPlaylists.status === 'fulfilled' ? (trendingPlaylists.value.data ?? []).map(mapPlaylist) : []
+    if (playlists.length) sections.push({ title: 'Trending Playlists', items: playlists })
+
+    const featured = featuredPlaylists.status === 'fulfilled' ? (featuredPlaylists.value.data ?? []).map(mapPlaylist) : []
+    if (featured.length) sections.push({ title: 'Featured Playlists', items: featured })
+
+    return sections
+  }
+
+  async getFeaturedPlaylists(language?: string): Promise<Playlist[]> {
+    try {
+      const lang = language ?? 'hindi'
+      const raw = await this.client.getFeaturedPlaylists(lang)
+      return (raw.data ?? []).map(mapPlaylist)
+    } catch {
+      return []
+    }
   }
 }

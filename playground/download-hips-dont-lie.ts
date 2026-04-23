@@ -4,8 +4,8 @@ async function main() {
   const mk = await MusicKit.create({ cache: { enabled: false } })
 
   // Force YouTube search so we get a downloadable ID directly
-  console.log('Searching YouTube for Rap God...')
-  const results = await mk.search('Eminem Rap God', { filter: 'songs', source: 'youtube' } as any) as any[]
+  console.log('Searching YouTube for Runaway by Aurora...')
+  const results = await mk.search('Aurora Runaway', { filter: 'songs', source: 'youtube' } as any) as any[]
   const song = results[0]
   console.log(`Found: ${song.title} — ${song.artist} (${song.videoId})`)
 

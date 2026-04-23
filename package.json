@@ -1,6 +1,6 @@
 {
   "name": "musicstream-sdk",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Music SDK for search, streaming, browse, lyrics and download. Unified API across JioSaavn and YouTube Music. No API keys required.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

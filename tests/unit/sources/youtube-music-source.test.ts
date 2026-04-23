@@ -73,9 +73,14 @@ describe('YouTubeMusicSource', () => {
       expect(source.canHandle('https://music.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true)
     })
 
-    it('returns true for any input — it is the catch-all source', () => {
+    it('returns true for any non-jio: input — it is the catch-all source', () => {
       expect(source.canHandle('some random string')).toBe(true)
       expect(source.canHandle('')).toBe(true)
+    })
+
+    it('returns false for jio: prefixed IDs — YouTube cannot handle JioSaavn IDs', () => {
+      expect(source.canHandle('jio:abc123')).toBe(false)
+      expect(source.canHandle('jio:EuIdJygC')).toBe(false)
     })
   })
 

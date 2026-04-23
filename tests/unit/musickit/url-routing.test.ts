@@ -180,14 +180,15 @@ describe('MusicKit — URL routing in search', () => {
   it('extracts query from YouTube Music search URL', async () => {
     const mk = new MusicKit()
     await mk.search('https://music.youtube.com/search?q=queen', { filter: 'songs' })
-    // Should search with "queen" not the raw URL
-    // The resolved query "queen" → JioSaavn canHandle returns true → JioSaavn.search called
-    expect(mockJioSaavnSource.search).toHaveBeenCalledWith('queen', { filter: 'songs' })
+    // The resolved query "queen" → YouTube is default source → discovery.search called
+    expect(mockDiscovery.search).toHaveBeenCalledWith('queen', { filter: 'songs' })
+    expect(mockJioSaavnSource.search).not.toHaveBeenCalled()
   })
 
   it('extracts decoded query from YouTube Music search URL with encoded chars', async () => {
     const mk = new MusicKit()
     await mk.search('https://music.youtube.com/search?q=tum+hi+ho', { filter: 'songs' })
-    expect(mockJioSaavnSource.search).toHaveBeenCalledWith('tum hi ho', { filter: 'songs' })
+    expect(mockDiscovery.search).toHaveBeenCalledWith('tum hi ho', { filter: 'songs' })
+    expect(mockJioSaavnSource.search).not.toHaveBeenCalled()
   })
 })

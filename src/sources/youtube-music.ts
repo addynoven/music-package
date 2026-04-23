@@ -11,8 +11,8 @@ export class YouTubeMusicSource implements AudioSource {
     private readonly resolver: StreamResolver,
   ) {}
 
-  canHandle(_query: string): boolean {
-    return true
+  canHandle(query: string): boolean {
+    return !query.startsWith('jio:')
   }
 
   async search(query: string, options: { filter?: SearchFilter; limit?: number } = {}): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {

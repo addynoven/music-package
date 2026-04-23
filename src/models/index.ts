@@ -125,6 +125,9 @@ export interface CacheConfig {
   ttl?: CacheTTLConfig
 }
 
+export type SourceName = 'jiosaavn' | 'youtube'
+export type SourcePreference = 'default' | 'best' | SourceName[]
+
 export interface MusicKitConfig {
   logLevel?: LogLevel
   logHandler?: (level: LogLevel, message: string) => void
@@ -139,6 +142,7 @@ export interface MusicKitConfig {
   maxRetries?: number
   backoffBase?: number
   backoffMax?: number
+  sourceOrder?: SourcePreference
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

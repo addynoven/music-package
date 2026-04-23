@@ -34,6 +34,7 @@ function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat
     ])
     let err = ''
     proc.stderr.on('data', (d: Buffer) => { err += d })
+    proc.on('error', (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)))
     proc.on('close', (code) => {
       if (code !== 0) reject(new Error(`yt-dlp download failed: ${err.slice(0, 200)}`))
       else resolve()
@@ -46,6 +47,17 @@ export class Downloader {
     private readonly resolver: StreamResolver,
     private readonly discovery: DiscoveryClient,
   ) {}
+
+  streamAudio(videoId: string): NodeJS.ReadableStream {
+    const proc = spawn('yt-dlp', [
+      '--no-playlist',
+      '-f', 'bestaudio',
+      '-o', '-',
+      `https://music.youtube.com/watch?v=${videoId}`,
+    ])
+    proc.stderr.resume()
+    return proc.stdout
+  }
 
   async download(videoId: string, options: DownloadOptions = {}): Promise<void> {
     const format = options.format ?? 'opus'
@@ -65,6 +77,9 @@ export class Downloader {
       const writeStream = createWriteStream(dest)
       return this.readWithProgress(options._mockReadStream, writeStream as any, stream.sizeBytes, options.onProgress)
     }
+
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(options.path ?? '.', { recursive: true })
 
     const writeStream = createWriteStream(dest)
 
@@ -106,6 +121,9 @@ export class Downloader {
 
     return new Promise<void>((resolve, reject) => {
       let downloaded = 0
+      // Register writeStream error listener immediately — not inside 'end',
+      // so errors that occur before the stream ends (e.g. ENOENT) are caught.
+      writeStream.on('error', (err) => { writeStream.destroy(); reject(err) })
       readable.on('data', (chunk: Buffer) => {
         writeStream.write(chunk)
         downloaded += chunk.length
@@ -116,8 +134,7 @@ export class Downloader {
       readable.on('error', (err) => { writeStream.destroy(); reject(err) })
       readable.on('end', () => {
         writeStream.end()
-        writeStream.on('finish', resolve)
-        writeStream.on('error', reject)
+        writeStream.once('finish', resolve)
       })
     })
   }

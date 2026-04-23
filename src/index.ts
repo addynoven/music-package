@@ -42,6 +42,8 @@ export type {
   CacheConfig,
   CacheTTLConfig,
   MusicKitConfig,
+  SourceName,
+  SourcePreference,
 
   // Events
   MusicKitEvent,

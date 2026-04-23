@@ -11,6 +11,7 @@ import { YouTubeMusicSource } from '../sources/youtube-music'
 import { JioSaavnSource, JIOSAAVN_LANGUAGES } from '../sources/jiosaavn'
 import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
+import { rankSongs } from '../discovery/ranker'
 import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
@@ -27,6 +28,8 @@ import type {
   Quality,
   DownloadOptions,
   BrowseOptions,
+  SourceName,
+  SourcePreference,
 } from '../models'
 
 type EventName = Parameters<MusicKitEmitter['on']>[0]
@@ -34,6 +37,12 @@ type EventHandler<E extends EventName> = Parameters<MusicKitEmitter['on']>[1] & 
 
 function makeReq(endpoint: string): MusicKitRequest {
   return { method: 'GET', endpoint, headers: {}, body: null }
+}
+
+function resolveSourceOrder(pref: SourcePreference = 'default'): SourceName[] {
+  if (pref === 'default') return ['jiosaavn', 'youtube']
+  if (pref === 'best') return ['youtube', 'jiosaavn']
+  return pref
 }
 
 export class MusicKit {
@@ -44,6 +53,7 @@ export class MusicKit {
   private readonly session: SessionManager
   private readonly emitter: MusicKitEmitter
   private readonly searchCache = new Map<string, SearchResults | Song[] | Album[] | Artist[]>()
+  private readonly sourceOrder: SourceName[]
   readonly sources: AudioSource[] = []
 
   private _discovery: DiscoveryClient | null = null
@@ -53,6 +63,7 @@ export class MusicKit {
 
   constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
     this.config = config
+    this.sourceOrder = resolveSourceOrder(config.sourceOrder ?? 'best')
     const cacheConfig = config.cache ?? {}
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,
@@ -91,7 +102,13 @@ export class MusicKit {
     this.sources.push(source)
   }
 
-  private sourceFor(query: string): AudioSource {
+  private sourceFor(query: string, override?: SourceName): AudioSource {
+    if (override) {
+      const targetName = override === 'youtube' ? 'youtube-music' : 'jiosaavn'
+      const found = this.sources.find(s => s.name === targetName)
+      if (!found) throw new Error(`Source '${override}' is not registered — check your sourceOrder config`)
+      return found
+    }
     const source = this.sources.find(s => s.canHandle(query))
     if (!source) throw new Error(`No source can handle: ${query}`)
     return source
@@ -112,8 +129,10 @@ export class MusicKit {
       this._downloader = new Downloader(this._stream, this._discovery)
     }
     if (this.sources.length === 0) {
-      this.sources.push(new JioSaavnSource())
-      this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+      for (const name of this.sourceOrder) {
+        if (name === 'jiosaavn') this.sources.push(new JioSaavnSource())
+        if (name === 'youtube') this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+      }
     }
   }
 
@@ -149,14 +168,14 @@ export class MusicKit {
     return this.call('autocomplete', () => this._discovery!.autocomplete(resolved))
   }
 
-  async search(query: string, options: { filter: 'songs'; limit?: number }): Promise<Song[]>
-  async search(query: string, options: { filter: 'albums'; limit?: number }): Promise<Album[]>
-  async search(query: string, options: { filter: 'artists'; limit?: number }): Promise<Artist[]>
-  async search(query: string, options: { filter: 'playlists'; limit?: number }): Promise<Playlist[]>
-  async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults>
-  async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
+  async search(query: string, options: { filter: 'songs'; limit?: number; source?: SourceName }): Promise<Song[]>
+  async search(query: string, options: { filter: 'albums'; limit?: number; source?: SourceName }): Promise<Album[]>
+  async search(query: string, options: { filter: 'artists'; limit?: number; source?: SourceName }): Promise<Artist[]>
+  async search(query: string, options: { filter: 'playlists'; limit?: number; source?: SourceName }): Promise<Playlist[]>
+  async search(query: string, options?: { filter?: SearchFilter; limit?: number; source?: SourceName }): Promise<SearchResults>
+  async search(query: string, options?: { filter?: SearchFilter; limit?: number; source?: SourceName }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {
     const resolved = resolveInput(query)
-    const cacheKey = `search:${resolved}:${options?.filter ?? 'all'}:${options?.limit ?? 'default'}`
+    const cacheKey = `search:${resolved}:${options?.filter ?? 'all'}:${options?.limit ?? 'default'}:${options?.source ?? 'auto'}`
 
     const inMemory = this.searchCache.get(cacheKey)
     if (inMemory !== undefined) {
@@ -175,7 +194,16 @@ export class MusicKit {
     await this.limiter.throttle('search', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
-    const result = await this.call('search', () => this.sourceFor(resolved).search(resolved, options ?? {}))
+    const { source: sourceOverride, ...searchOpts } = options ?? {}
+    const raw = await this.call('search', () => this.sourceFor(resolved, sourceOverride).search(resolved, searchOpts))
+    const isJioResults = (songs: Song[]) => songs.length > 0 && songs[0].videoId.startsWith('jio:')
+    const result = options?.filter === 'songs'
+      ? isJioResults(raw as Song[]) ? rankSongs(raw as Song[]) : raw
+      : !Array.isArray(raw)
+        ? isJioResults((raw as SearchResults).songs)
+          ? { ...(raw as SearchResults), songs: rankSongs((raw as SearchResults).songs) }
+          : raw
+        : raw
     this.searchCache.set(cacheKey, result as any)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
@@ -211,9 +239,20 @@ export class MusicKit {
     return { ...song, stream: streamData }
   }
 
-  async getHome(options?: { language?: string }): Promise<Section[]> {
+  async getHome(options?: { language?: string; source?: SourceName }): Promise<Section[]> {
     await this.ensureClients()
     const lang = options?.language
+
+    if (options?.source === 'youtube') {
+      return this.call('browse', () => this._discovery!.getHome())
+    }
+
+    if (options?.source === 'jiosaavn') {
+      const src = this.sources.find(s => s.name === 'jiosaavn' && s.getHome)
+      if (src) return this.call('browse', () => src.getHome!(lang))
+      return []
+    }
+
     const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang)
     if (useJio) {
       const src = this.sources.find(s => s.getHome)
@@ -222,9 +261,12 @@ export class MusicKit {
     return this.call('browse', () => this._discovery!.getHome())
   }
 
-  async getFeaturedPlaylists(options?: { language?: string }): Promise<Playlist[]> {
+  async getFeaturedPlaylists(options?: { language?: string; source?: SourceName }): Promise<Playlist[]> {
     await this.ensureClients()
-    const src = this.sources.find(s => s.getFeaturedPlaylists)
+    const targetName = options?.source === 'youtube' ? 'youtube-music' : options?.source === 'jiosaavn' ? 'jiosaavn' : null
+    const src = targetName
+      ? this.sources.find(s => s.name === targetName && s.getFeaturedPlaylists)
+      : this.sources.find(s => s.getFeaturedPlaylists)
     if (src) return this.call('browse', () => src.getFeaturedPlaylists!(options?.language))
     return []
   }
@@ -325,7 +367,32 @@ export class MusicKit {
 
   async download(videoId: string, options?: DownloadOptions): Promise<void> {
     await this.ensureClients()
-    return this._downloader!.download(resolveInput(videoId), options)
+    let id = resolveInput(videoId)
+
+    if (id.startsWith('jio:')) {
+      const meta = await this.sourceFor(id).getMetadata(id)
+      const ytSongs = await this._discovery!.search(`${meta.title} ${meta.artist}`, { filter: 'songs' }) as Song[]
+      const match = ytSongs.find(s => s.videoId && !s.videoId.startsWith('jio:'))
+      if (!match?.videoId) throw new Error(`No downloadable YouTube equivalent found for: ${id}`)
+      id = match.videoId
+    }
+
+    return this._downloader!.download(id, options)
+  }
+
+  async streamAudio(id: string): Promise<NodeJS.ReadableStream> {
+    await this.ensureClients()
+    const resolved = resolveInput(id)
+
+    if (resolved.startsWith('jio:')) {
+      const streamData = await this.call('stream', () => this.sourceFor(resolved).getStream(resolved, 'high'))
+      const response = await fetch(streamData.url)
+      if (!response.ok) throw new Error(`Stream fetch failed: ${response.status}`)
+      const { Readable } = await import('node:stream')
+      return Readable.fromWeb(response.body as any)
+    }
+
+    return this._downloader!.streamAudio(resolved)
   }
 }
 

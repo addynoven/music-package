@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import type { Innertube } from 'youtubei.js'
 import { Platform } from 'youtubei.js/agnostic'
 import { Cache } from '../cache'
@@ -20,10 +21,6 @@ function patchEvalIfNeeded() {
   }
 }
 
-function parseCodec(mimeType: string): 'opus' | 'mp4a' {
-  return mimeType.includes('opus') ? 'opus' : 'mp4a'
-}
-
 function parseExpiry(url: string): number {
   try {
     return parseInt(new URL(url).searchParams.get('expire') ?? '0', 10)
@@ -32,10 +29,44 @@ function parseExpiry(url: string): number {
   }
 }
 
+function ytdlpResolve(videoId: string, quality: Quality): Promise<StreamingData> {
+  return new Promise((resolve, reject) => {
+    const formatSelector = quality === 'low' ? 'worstaudio' : 'bestaudio'
+    execFile('yt-dlp', [
+      '--no-playlist',
+      '--dump-json',
+      '-f', formatSelector,
+      `https://music.youtube.com/watch?v=${videoId}`,
+    ], (err, stdout) => {
+      if (err) {
+        reject(new Error(`yt-dlp failed: ${((err as any).stderr ?? String(err)).slice(0, 200)}`))
+        return
+      }
+      try {
+        const json = JSON.parse(stdout)
+        const url: string = json.url
+        const acodec: string = json.acodec ?? ''
+        const codec: 'opus' | 'mp4a' = acodec.includes('opus') ? 'opus' : 'mp4a'
+        const bitrateKbps: number = json.abr ?? json.tbr ?? 0
+        const sizeBytes: number | undefined = json.filesize ?? json.filesize_approx ?? undefined
+        resolve({
+          url,
+          codec,
+          bitrate: Math.round(bitrateKbps * 1000),
+          expiresAt: parseExpiry(url),
+          ...(sizeBytes != null && { sizeBytes }),
+        })
+      } catch (parseErr) {
+        reject(new Error(`Failed to parse yt-dlp output: ${parseErr}`))
+      }
+    })
+  })
+}
+
 export class StreamResolver {
   constructor(
     private readonly cache: Cache,
-    private readonly yt: Innertube,
+    readonly yt: Innertube,
   ) {
     patchEvalIfNeeded()
   }
@@ -50,28 +81,7 @@ export class StreamResolver {
       return cached
     }
 
-    const info = await this.yt.music.getInfo(videoId)
-    const formats = info.streaming_data?.adaptive_formats ?? []
-    const audioFmts = formats.filter((f: any) => f.has_audio && !f.has_video)
-
-    if (!audioFmts.length) {
-      throw new Error(`No audio formats found for videoId: ${videoId}`)
-    }
-
-    const fmt = q === 'high'
-      ? audioFmts.sort((a: any, b: any) => b.bitrate - a.bitrate)[0]
-      : audioFmts.sort((a: any, b: any) => a.bitrate - b.bitrate)[0]
-
-    const url = await (fmt as any).decipher((this.yt as any).session.player)
-
-    const data: StreamingData = {
-      url,
-      codec: parseCodec((fmt as any).mime_type ?? ''),
-      bitrate: (fmt as any).bitrate ?? 0,
-      expiresAt: parseExpiry(url),
-      ...((fmt as any).loudness_db !== undefined && { loudnessDb: (fmt as any).loudness_db }),
-      ...((fmt as any).content_length !== undefined && { sizeBytes: parseInt((fmt as any).content_length, 10) }),
-    }
+    const data = await ytdlpResolve(videoId, q)
 
     this.cache.set(cacheKey, data, Cache.TTL.STREAM)
     return data

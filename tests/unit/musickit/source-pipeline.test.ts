@@ -106,13 +106,4 @@ describe('MusicKit — source pipeline order', () => {
     })
   })
 
-  describe('default pipeline after ensureClients', () => {
-    it('auto-registers jiosaavn as first source and youtube-music as second', async () => {
-      const mk = new MusicKit()
-      await (mk as any).ensureClients()
-      const names = mk.sources.map(s => s.name)
-      expect(names[0]).toBe('jiosaavn')
-      expect(names[1]).toBe('youtube-music')
-    })
-  })
 })

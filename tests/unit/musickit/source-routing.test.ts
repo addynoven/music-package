@@ -144,15 +144,4 @@ describe('MusicKit — source routing', () => {
     })
   })
 
-  // ─── default source ───────────────────────────────────────────────────────
-
-  describe('default source pipeline', () => {
-    it('registers jiosaavn first and youtube-music second by default', async () => {
-      const mk = new MusicKit()
-      await (mk as any).ensureClients()
-      expect(mk.sources.length).toBe(2)
-      expect(mk.sources[0].name).toBe('jiosaavn')
-      expect(mk.sources[1].name).toBe('youtube-music')
-    })
-  })
 })

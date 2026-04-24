@@ -64,7 +64,7 @@ describe('DiscoveryClient', () => {
     it('returns an array of suggestion strings', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
         ok: true,
-        json: async () => ['never gonna', ['never gonna give you up', 'never gonna let you down']],
+        text: async () => `window.google.ac.h(["never gonna",[["never gonna give you up",0,[512]],["never gonna let you down",0,[512]]],[]])`,
       } as any)
 
       const suggestions = await client.autocomplete('never gonna')
@@ -75,7 +75,7 @@ describe('DiscoveryClient', () => {
     it('passes the query to the suggest endpoint', async () => {
       const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
         ok: true,
-        json: async () => ['queen', ['queen', 'queen bohemian rhapsody']],
+        text: async () => `window.google.ac.h(["queen",[["queen",0,[512]],["queen bohemian rhapsody",0,[512]]],[]])`,
       } as any)
 
       await client.autocomplete('queen')
@@ -88,7 +88,7 @@ describe('DiscoveryClient', () => {
     it('returns an empty array when the response has no suggestions', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
         ok: true,
-        json: async () => ['xyzzy', []],
+        text: async () => `window.google.ac.h(["xyzzy",[],[]])`,
       } as any)
 
       const result = await client.autocomplete('xyzzy')
@@ -100,6 +100,17 @@ describe('DiscoveryClient', () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: false } as any)
 
       const result = await client.autocomplete('anything')
+
+      expect(result).toEqual([])
+    })
+
+    it('returns empty array when JSONP wrapper is malformed', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        text: async () => `unexpected response format`,
+      } as any)
+
+      const result = await client.autocomplete('test')
 
       expect(result).toEqual([])
     })

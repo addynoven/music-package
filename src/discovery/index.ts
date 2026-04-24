@@ -109,16 +109,19 @@ export class DiscoveryClient {
   }
 
   async autocomplete(query: string): Promise<string[]> {
-    const url = new URL('https://suggestqueries-music.youtube.com/complete/search')
-    url.searchParams.set('client', 'youtube-music')
-    url.searchParams.set('ds', 'ytm')
+    const url = new URL('https://suggestqueries.google.com/complete/search')
+    url.searchParams.set('client', 'youtube')
+    url.searchParams.set('ds', 'yt')
     url.searchParams.set('q', query)
 
     const res = await fetch(url)
     if (!res.ok) return []
-    // Response: ["query", ["suggestion1", "suggestion2", ...], ...]
-    const data = await res.json() as any[]
-    return (data[1] ?? []) as string[]
+    // Response is JSONP: window.google.ac.h(["query",[["suggestion",0,[512]],...],...])
+    const text = await res.text()
+    const match = text.match(/^window\.google\.ac\.h\((.*)\)$/)
+    if (!match) return []
+    const data = JSON.parse(match[1]) as any[]
+    return (data[1] ?? []).map((item: any[]) => item[0] as string)
   }
 
   async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {

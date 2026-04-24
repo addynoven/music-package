@@ -62,27 +62,44 @@ describe('DiscoveryClient', () => {
 
   describe('autocomplete', () => {
     it('returns an array of suggestion strings', async () => {
-      mockYt.music.getSearchSuggestions.mockResolvedValue([
-        { contents: [{ suggestion: { text: 'never gonna give you up' } }, { suggestion: { text: 'never gonna let you down' } }] },
-      ])
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ['never gonna', ['never gonna give you up', 'never gonna let you down']],
+      } as any)
 
       const suggestions = await client.autocomplete('never gonna')
 
       expect(suggestions).toEqual(['never gonna give you up', 'never gonna let you down'])
     })
 
-    it('passes the query to the underlying library', async () => {
-      mockYt.music.getSearchSuggestions.mockResolvedValue([])
+    it('passes the query to the suggest endpoint', async () => {
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ['queen', ['queen', 'queen bohemian rhapsody']],
+      } as any)
 
       await client.autocomplete('queen')
 
-      expect(mockYt.music.getSearchSuggestions).toHaveBeenCalledWith('queen')
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        href: expect.stringContaining('q=queen'),
+      }))
     })
 
-    it('returns an empty array when the library returns nothing', async () => {
-      mockYt.music.getSearchSuggestions.mockResolvedValue([])
+    it('returns an empty array when the response has no suggestions', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ['xyzzy', []],
+      } as any)
 
       const result = await client.autocomplete('xyzzy')
+
+      expect(result).toEqual([])
+    })
+
+    it('returns empty array on fetch failure', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: false } as any)
+
+      const result = await client.autocomplete('anything')
 
       expect(result).toEqual([])
     })

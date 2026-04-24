@@ -109,12 +109,16 @@ export class DiscoveryClient {
   }
 
   async autocomplete(query: string): Promise<string[]> {
-    const res = await this.yt.music.getSearchSuggestions(query) as any[]
-    return res.flatMap((section: any) =>
-      (section.contents ?? [])
-        .map((c: any) => c.suggestion?.text ?? c.query?.text)
-        .filter(Boolean)
-    )
+    const url = new URL('https://suggestqueries-music.youtube.com/complete/search')
+    url.searchParams.set('client', 'youtube-music')
+    url.searchParams.set('ds', 'ytm')
+    url.searchParams.set('q', query)
+
+    const res = await fetch(url)
+    if (!res.ok) return []
+    // Response: ["query", ["suggestion1", "suggestion2", ...], ...]
+    const data = await res.json() as any[]
+    return (data[1] ?? []) as string[]
   }
 
   async search(query: string, options?: { filter?: SearchFilter; limit?: number }): Promise<SearchResults | Song[] | Album[] | Artist[] | Playlist[]> {

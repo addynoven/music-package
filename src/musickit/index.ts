@@ -174,10 +174,15 @@ export class MusicKit {
   }
 
   async autocomplete(query: string): Promise<string[]> {
-    await this.ensureClients()
     const resolved = resolveInput(query)
     if (resolved.startsWith('jio:')) return []
-    return this.call('autocomplete', () => this._discovery!.autocomplete(resolved))
+    const cacheKey = `autocomplete:${resolved}`
+    const cached = this.cache.get<string[]>(cacheKey)
+    if (cached) return cached
+    await this.ensureClients()
+    const result = await this.call('autocomplete', () => this._discovery!.autocomplete(resolved))
+    this.cache.set(cacheKey, result, 60)
+    return result
   }
 
   async search(query: string, options: { filter: 'songs'; limit?: number; source?: SourceName }): Promise<Song[]>

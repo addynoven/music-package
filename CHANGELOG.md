@@ -5,6 +5,16 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.2] — 2026-04-25
+
+### Fixed
+- **`node:sqlite` import preserved in dist** — esbuild was normalising `node:sqlite` to `sqlite`
+  (a specifier that doesn't exist as a bare module). Added a `tsup.config.ts` with a post-build
+  patch so both `dist/index.mjs` and `dist/index.js` correctly import from `"node:sqlite"`.
+  Previously the package was broken on a clean `pnpm install` unless the dist was patched manually.
+
+---
+
 ## [0.5.1] — 2026-04-24
 
 ### Fixed

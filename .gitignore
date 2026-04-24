@@ -1,2 +1,7 @@
-# Added by code-review-graph
-.code-review-graph/
+node_modules/
+dist/
+*.log
+.env
+.env.*
+coverage/
+.vite/

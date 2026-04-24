@@ -5,6 +5,27 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.1] — 2026-04-24
+
+### Fixed
+- **Autocomplete** switched from InnerTube (`yt.music.getSearchSuggestions`) to the public
+  `suggestqueries.google.com/complete/search?client=youtube&ds=yt` endpoint. No auth, no API
+  key, no InnerTube session needed. Zero quota cost. JSONP response parsed with a regex extractor.
+- **Caching gaps** — `getMetadata`, `getHome`, `getArtist`, `getAlbum`, `getPlaylist`,
+  `getRadio`, `getRelated`, `getSuggestions`, and `autocomplete` were not persisting results
+  despite TTL constants existing. All gaps fixed; browse calls now correctly hit SQLite cache.
+- **`getSuggestions()` bypass** — was calling `this._discovery.getRelated()` and
+  `this._discovery.search()` directly, skipping MusicKit's cache and rate-limiter layers.
+  Now routes through `this.getMetadata()`, `this.search()`, and `this.getRelated()`.
+- **`getRelated()` empty `videoId` entries** — missing `.filter()` before `.map(mapSongItem)`
+  in `DiscoveryClient.getRelated()` caused songs with `videoId: ''` to appear in results.
+  Filter now guards the map.
+- **JioSaavn live tests failing when `YT_API_KEY` is set** — `live-jiosaavn.test.ts` now
+  uses `sourceOrder: ['jiosaavn']` so `YouTubeDataAPISource` is never registered during the
+  JioSaavn-specific test run.
+
+---
+
 ## [0.5.0] — 2026-04-24
 
 ### Added

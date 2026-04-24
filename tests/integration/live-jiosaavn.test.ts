@@ -22,7 +22,7 @@ describe.skipIf(SKIP)('Live JioSaavn API — real responses', () => {
   let playlistId: string
 
   beforeAll(async () => {
-    mk = await MusicKit.create({ cache: { enabled: false } })
+    mk = await MusicKit.create({ cache: { enabled: false }, sourceOrder: ['jiosaavn'] })
 
     // Resolve stable IDs via search so tests don't depend on hardcoded values
     const [songs, albums, artists, playlists] = await Promise.all([

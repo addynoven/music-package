@@ -5,7 +5,35 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased] — 0.3.0
+## [0.5.0] — 2026-04-24
+
+### Added
+- `youtubeApiKey` config option — when set, registers `YouTubeDataAPISource` as the YouTube
+  search backend. Uses YouTube Data API v3 (`search.list` + batch `videos.list`) instead of
+  InnerTube. Official API with generous quotas — never rate-limited at normal bot usage.
+  Falls back to `YouTubeMusicSource` (InnerTube) when no key is provided.
+- `cookiesPath` config option — path to a Netscape `cookies.txt` file. Passed via
+  `--cookies` to every yt-dlp invocation (stream resolution and download), giving the
+  session significantly higher YouTube rate limits.
+- Startup warning logged when neither `youtubeApiKey` nor `cookiesPath` is configured,
+  recommending credentials for production use.
+- `YouTubeDataAPISource` exported from `musicstream-sdk/sources` for custom pipelines.
+
+### Changed
+- SQLite backend replaced: `better-sqlite3` (native C++ addon, NODE_MODULE_VERSION issues)
+  removed in favour of Node's built-in `node:sqlite` (`DatabaseSync`). Zero native
+  compilation — works on any Node 22+ machine without rebuilding.
+- Minimum Node version raised to **22** (`engines: { node: ">=22" }`).
+- GitHub Actions CI updated to Node 22.
+
+---
+
+## [0.4.0]
+
+### Added
+- `getSuggestions(id)` — unified "up next" API. YouTube-first: looks up the YouTube
+  equivalent of any song via metadata search, then uses YouTube's global recommendation
+  engine. Falls back to source-native radio when YouTube lookup fails.
 
 ### Added
 - `getSuggestions(id)` — unified "up next" API. YouTube-first: looks up the YouTube

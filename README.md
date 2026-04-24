@@ -1,7 +1,7 @@
 # musicstream-sdk
 
 Node.js SDK for music search, streaming, browse, lyrics, and download.
-Unified API across JioSaavn and YouTube Music — **no API keys required**.
+Unified API across JioSaavn and YouTube Music.
 
 ```bash
 npm install musicstream-sdk
@@ -9,7 +9,27 @@ npm install musicstream-sdk
 pnpm add musicstream-sdk
 ```
 
-> **Requires** [yt-dlp](https://github.com/yt-dlp/yt-dlp) on your PATH for the download fallback.
+> **Requires** [yt-dlp](https://github.com/yt-dlp/yt-dlp) on your PATH for stream resolution and download.
+
+---
+
+## Production setup
+
+For production use (bots, servers, high-traffic apps) configure both credentials to avoid YouTube rate limits:
+
+```ts
+const mk = new MusicKit({
+  youtubeApiKey: process.env.YT_API_KEY,      // YouTube Data API v3 — for search
+  cookiesPath:   process.env.COOKIES_PATH,    // yt-dlp cookies.txt — for streams
+})
+```
+
+| Credential | What it does | How to get it |
+|---|---|---|
+| `youtubeApiKey` | Uses YouTube Data API v3 for search (~100 searches/day free, never rate-limited at normal usage) | [Google Cloud Console](https://console.cloud.google.com) → enable YouTube Data API v3 → create API key |
+| `cookiesPath` | Passes a logged-in session to yt-dlp — dramatically higher stream rate limits | Export from browser via [cookies.txt extension](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) or `yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download "https://youtube.com"` |
+
+If neither is set, the SDK logs a warning and falls back to anonymous InnerTube + yt-dlp (fine for personal use, will hit 429 under load).
 
 ---
 
@@ -275,6 +295,10 @@ const mk = new MusicKit({
   backoffBase: 1000,          // ms
   backoffMax:  30000,         // ms
 
+  // Production credentials
+  youtubeApiKey: process.env.YT_API_KEY,    // YouTube Data API v3 for search
+  cookiesPath: process.env.COOKIES_PATH,    // path to cookies.txt for yt-dlp streams
+
   // SQLite cache
   cache: {
     enabled: true,
@@ -465,8 +489,8 @@ What this means in practice:
 
 ## Requirements
 
-- Node.js 18+
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH *(only needed for `download()`)*
+- Node.js 22+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH *(required for stream resolution and `download()`)*
 
 ## License
 

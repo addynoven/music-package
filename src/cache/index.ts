@@ -14,6 +14,7 @@ export class Cache {
     HOME: 28_800,
     ARTIST: 3_600,
     VISITOR_ID: 2_592_000,
+    LYRICS: 315_360_000, // 10 years — lyrics never change
   } as const
 
   private db: DatabaseSync | null = null

@@ -10,6 +10,8 @@ import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
 import { YouTubeDataAPISource } from '../sources/youtube-data-api'
 import { JioSaavnSource, JIOSAAVN_LANGUAGES } from '../sources/jiosaavn'
+import { fetchFromLrclib } from '../lyrics/lrclib'
+import { fetchFromLyricsOvh } from '../lyrics/lyrics-ovh'
 import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
 import { rankSongs } from '../discovery/ranker'
@@ -415,14 +417,27 @@ export class MusicKit {
     return result
   }
 
-  async getLyrics(id: string): Promise<string | null> {
+  async getLyrics(id: string): Promise<import('../models').Lyrics | null> {
     await this.ensureClients()
     const resolved = resolveInput(id)
-    if (resolved.startsWith('jio:')) {
-      const src = this.sourceFor(resolved)
-      if (src.getLyrics) return src.getLyrics(resolved)
+
+    const cacheKey = `lyrics:${resolved}`
+    const cached = this.cache.get<import('../models').Lyrics>(cacheKey)
+    if (cached !== null) return cached
+
+    let lyrics: import('../models').Lyrics | null = null
+
+    try {
+      const meta = await this.getMetadata(resolved)
+      const artist = sanitizeArtist(meta.artist)
+      const title = sanitizeTitle(meta.title)
+      lyrics = await fetchFromLrclib(artist, title) ?? await fetchFromLyricsOvh(artist, title)
+    } catch {
+      // ignore — return null below
     }
-    return null
+
+    if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS)
+    return lyrics
   }
 
   async getCharts(options?: BrowseOptions): Promise<Section[]> {
@@ -459,5 +474,21 @@ export class MusicKit {
 
     return this._downloader!.streamAudio(resolved)
   }
+}
+
+// YouTube titles are messy ("Eminem - Rap God (Official Video) [Explicit]").
+// Strip common suffixes so lyrics APIs can match cleanly.
+const TITLE_NOISE = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi
+const ARTIST_NOISE = /\s*([-–—].*|VEVO|Official|Music|Records?|Productions?)$/i
+
+function sanitizeTitle(t: string): string {
+  // "Artist - Title (Official)" → strip everything after " - " if title looks like it has artist prefix
+  const dash = t.indexOf(' - ')
+  const cleaned = dash !== -1 ? t.slice(dash + 3) : t
+  return cleaned.replace(TITLE_NOISE, '').trim()
+}
+
+function sanitizeArtist(a: string): string {
+  return a.replace(ARTIST_NOISE, '').trim()
 }
 

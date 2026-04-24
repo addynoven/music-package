@@ -49,6 +49,16 @@ export interface Section {
   items: (Song | Album | Artist | Playlist)[]
 }
 
+export interface LyricLine {
+  time: number  // seconds (e.g. 17.73)
+  text: string
+}
+
+export interface Lyrics {
+  plain: string
+  synced: LyricLine[] | null  // null when source only has plain text
+}
+
 export interface StreamingData {
   url: string
   codec: 'opus' | 'mp4a'

@@ -5,6 +5,25 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] — 2026-04-25
+
+### Breaking
+- `getLyrics(id)` now returns `Lyrics | null` instead of `string | null`.
+  `Lyrics = { plain: string, synced: LyricLine[] | null }` where
+  `LyricLine = { time: number, text: string }` (time in seconds).
+
+### Changed
+- `getLyrics` completely rewritten. JioSaavn lyrics removed (poor coverage outside
+  Indian music). Now uses **LRCLIB** as primary source (synced + plain lyrics, no auth,
+  no rate limit) with **lyrics.ovh** as fallback (plain only, fans out to Genius,
+  AZLyrics, and four others). Works for any song ID — YouTube or JioSaavn.
+- YouTube artist/title sanitised before lookup: strips VEVO suffix, "(Official Video)",
+  "(Explicit)", and similar noise so lyrics APIs can match cleanly.
+- `getLyrics` results cached permanently (`TTL = 10 years`) — lyrics never change.
+- `LyricLine` and `Lyrics` types exported from the public API.
+
+---
+
 ## [0.5.2] — 2026-04-25
 
 ### Fixed

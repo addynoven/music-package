@@ -28,6 +28,8 @@ export type {
   StreamingData,
   AudioTrack,
   SearchResults,
+  Lyrics,
+  LyricLine,
 
   // Options & config
   SearchOptions,

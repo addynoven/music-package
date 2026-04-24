@@ -254,79 +254,113 @@ export class MusicKit {
   async getHome(options?: { language?: string; source?: SourceName }): Promise<Section[]> {
     await this.ensureClients()
     const lang = options?.language
+    const cacheKey = `home:${lang ?? 'default'}:${options?.source ?? 'auto'}`
+    const cached = this.cache.get<Section[]>(cacheKey)
+    if (cached) return cached
 
+    let result: Section[]
     if (options?.source === 'youtube') {
-      return this.call('browse', () => this._discovery!.getHome())
-    }
-
-    if (options?.source === 'jiosaavn') {
+      result = await this.call('browse', () => this._discovery!.getHome())
+    } else if (options?.source === 'jiosaavn') {
       const src = this.sources.find(s => s.name === 'jiosaavn' && s.getHome)
-      if (src) return this.call('browse', () => src.getHome!(lang))
-      return []
+      result = src ? await this.call('browse', () => src.getHome!(lang)) : []
+    } else {
+      const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang)
+      if (useJio) {
+        const src = this.sources.find(s => s.getHome)
+        result = src
+          ? await this.call('browse', () => src.getHome!(lang))
+          : await this.call('browse', () => this._discovery!.getHome())
+      } else {
+        result = await this.call('browse', () => this._discovery!.getHome())
+      }
     }
 
-    const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang)
-    if (useJio) {
-      const src = this.sources.find(s => s.getHome)
-      if (src) return this.call('browse', () => src.getHome!(lang))
-    }
-    return this.call('browse', () => this._discovery!.getHome())
+    this.cache.set(cacheKey, result, Cache.TTL.HOME)
+    return result
   }
 
   async getFeaturedPlaylists(options?: { language?: string; source?: SourceName }): Promise<Playlist[]> {
     await this.ensureClients()
+    const cacheKey = `featured:${options?.language ?? 'default'}:${options?.source ?? 'auto'}`
+    const cached = this.cache.get<Playlist[]>(cacheKey)
+    if (cached) return cached
+
     const targetName = options?.source === 'youtube' ? 'youtube-music' : options?.source === 'jiosaavn' ? 'jiosaavn' : null
     const src = targetName
       ? this.sources.find(s => s.name === targetName && s.getFeaturedPlaylists)
       : this.sources.find(s => s.getFeaturedPlaylists)
-    if (src) return this.call('browse', () => src.getFeaturedPlaylists!(options?.language))
-    return []
+    const result = src ? await this.call('browse', () => src.getFeaturedPlaylists!(options?.language)) : []
+    if (result.length > 0) this.cache.set(cacheKey, result, Cache.TTL.HOME)
+    return result
   }
 
   async getArtist(channelId: string): Promise<Artist> {
     await this.ensureClients()
     const id = resolveInput(channelId)
-    if (id.startsWith('jio:')) {
-      const src = this.sourceFor(id)
-      if (src.getArtist) return this.call('browse', () => src.getArtist!(id))
-    }
-    return this.call('browse', () => this._discovery!.getArtist(id))
+    const cacheKey = `artist:${id}`
+    const cached = this.cache.get<Artist>(cacheKey)
+    if (cached) return cached
+
+    const result = id.startsWith('jio:')
+      ? await (async () => { const src = this.sourceFor(id); if (src.getArtist) return this.call('browse', () => src.getArtist!(id)); return this.call('browse', () => this._discovery!.getArtist(id)) })()
+      : await this.call('browse', () => this._discovery!.getArtist(id))
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
+    return result
   }
 
   async getAlbum(browseId: string): Promise<Album> {
     await this.ensureClients()
     const id = resolveInput(browseId)
-    if (id.startsWith('jio:')) {
-      const src = this.sourceFor(id)
-      if (src.getAlbum) return this.call('browse', () => src.getAlbum!(id))
-    }
-    return this.call('browse', () => this._discovery!.getAlbum(id))
+    const cacheKey = `album:${id}`
+    const cached = this.cache.get<Album>(cacheKey)
+    if (cached) return cached
+
+    const result = id.startsWith('jio:')
+      ? await (async () => { const src = this.sourceFor(id); if (src.getAlbum) return this.call('browse', () => src.getAlbum!(id)); return this.call('browse', () => this._discovery!.getAlbum(id)) })()
+      : await this.call('browse', () => this._discovery!.getAlbum(id))
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
+    return result
   }
 
   async getPlaylist(playlistId: string): Promise<Playlist> {
     await this.ensureClients()
     const id = resolveInput(playlistId)
-    if (id.startsWith('jio:')) {
-      const src = this.sourceFor(id)
-      if (src.getPlaylist) return this.call('browse', () => src.getPlaylist!(id))
-    }
-    return this.call('browse', () => this._discovery!.getPlaylist(id))
+    const cacheKey = `playlist:${id}`
+    const cached = this.cache.get<Playlist>(cacheKey)
+    if (cached) return cached
+
+    const result = id.startsWith('jio:')
+      ? await (async () => { const src = this.sourceFor(id); if (src.getPlaylist) return this.call('browse', () => src.getPlaylist!(id)); return this.call('browse', () => this._discovery!.getPlaylist(id)) })()
+      : await this.call('browse', () => this._discovery!.getPlaylist(id))
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
+    return result
   }
 
   async getRadio(videoId: string): Promise<Song[]> {
     await this.ensureClients()
     const id = resolveInput(videoId)
-    if (id.startsWith('jio:')) {
-      const src = this.sourceFor(id)
-      if (src.getRadio) return this.call('browse', () => src.getRadio!(id))
-    }
-    return this.call('browse', () => this._discovery!.getRadio(id))
+    const cacheKey = `radio:${id}`
+    const cached = this.cache.get<Song[]>(cacheKey)
+    if (cached) return cached
+
+    const result = id.startsWith('jio:')
+      ? await (async () => { const src = this.sourceFor(id); if (src.getRadio) return this.call('browse', () => src.getRadio!(id)); return this.call('browse', () => this._discovery!.getRadio(id)) })()
+      : await this.call('browse', () => this._discovery!.getRadio(id))
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
+    return result
   }
 
   async getRelated(videoId: string): Promise<Song[]> {
     await this.ensureClients()
     const id = resolveInput(videoId)
-    return this.call('browse', () => this._discovery!.getRelated(id))
+    const cacheKey = `related:${id}`
+    const cached = this.cache.get<Song[]>(cacheKey)
+    if (cached) return cached
+
+    const result = await this.call('browse', () => this._discovery!.getRelated(id))
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
+    return result
   }
 
   async getSuggestions(id: string): Promise<Song[]> {
@@ -356,10 +390,15 @@ export class MusicKit {
   async getMetadata(id: string): Promise<Song> {
     await this.ensureClients()
     const resolved = resolveInput(id)
-    if (resolved.startsWith('jio:')) {
-      return this.call('browse', () => this.sourceFor(resolved).getMetadata(resolved))
-    }
-    return this.call('browse', () => this._discovery!.getInfo(resolved))
+    const cacheKey = `metadata:${resolved}`
+    const cached = this.cache.get<Song>(cacheKey)
+    if (cached) return cached
+
+    const result = resolved.startsWith('jio:')
+      ? await this.call('browse', () => this.sourceFor(resolved).getMetadata(resolved))
+      : await this.call('browse', () => this._discovery!.getInfo(resolved))
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
+    return result
   }
 
   async getLyrics(id: string): Promise<string | null> {

@@ -151,6 +151,7 @@ interface MusicKitConfig {
     backoffBase?: number;
     backoffMax?: number;
     sourceOrder?: SourcePreference;
+    cookiesPath?: string;
 }
 interface MusicKitRequest {
     method: string;
@@ -364,7 +365,8 @@ declare class DiscoveryClient {
 declare class StreamResolver {
     private readonly cache;
     readonly yt: Innertube;
-    constructor(cache: Cache, yt: Innertube);
+    private readonly cookiesPath?;
+    constructor(cache: Cache, yt: Innertube, cookiesPath?: string | undefined);
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
         quality?: Quality;
@@ -382,7 +384,8 @@ interface DownloadOptions {
 declare class Downloader {
     private readonly resolver;
     private readonly discovery;
-    constructor(resolver: StreamResolver, discovery: DiscoveryClient);
+    private readonly cookiesPath?;
+    constructor(resolver: StreamResolver, discovery: DiscoveryClient, cookiesPath?: string | undefined);
     streamAudio(videoId: string): NodeJS.ReadableStream;
     download(videoId: string, options?: DownloadOptions): Promise<void>;
     private fetchAndWrite;

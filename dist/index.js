@@ -52,14 +52,14 @@ module.exports = __toCommonJS(index_exports);
 var import_youtubei = require("youtubei.js");
 
 // src/cache/index.ts
-var import_better_sqlite3 = __toESM(require("better-sqlite3"));
+var import_node_sqlite = require("sqlite");
 var URL_EXPIRY_BUFFER = 1800;
 var Cache = class {
   constructor(options) {
     this.db = null;
     this.enabled = options.enabled;
     if (!this.enabled) return;
-    this.db = new import_better_sqlite3.default(options.path ?? ":memory:");
+    this.db = new import_node_sqlite.DatabaseSync(options.path ?? ":memory:");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS cache (
         key TEXT PRIMARY KEY,
@@ -536,11 +536,13 @@ function parseExpiry(url) {
     return 0;
   }
 }
-function ytdlpResolve(videoId, quality) {
+function ytdlpResolve(videoId, quality, cookiesPath) {
   return new Promise((resolve, reject) => {
     const formatSelector = quality === "low" ? "worstaudio" : "bestaudio";
+    const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
     (0, import_node_child_process.execFile)("yt-dlp", [
       "--no-playlist",
+      ...cookiesArgs,
       "--dump-json",
       "-f",
       formatSelector,
@@ -571,9 +573,10 @@ function ytdlpResolve(videoId, quality) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, yt) {
+  constructor(cache, yt, cookiesPath) {
     this.cache = cache;
     this.yt = yt;
+    this.cookiesPath = cookiesPath;
     patchEvalIfNeeded();
   }
   async resolve(videoId, quality = "high") {
@@ -584,7 +587,7 @@ var StreamResolver = class {
     if (cached && !this.cache.isUrlExpired(cached.url)) {
       return cached;
     }
-    const data = await ytdlpResolve(videoId, q);
+    const data = await ytdlpResolve(videoId, q, this.cookiesPath);
     this.cache.set(cacheKey, data, Cache.TTL.STREAM);
     return data;
   }
@@ -598,10 +601,12 @@ var INVALID_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
 function sanitize(name) {
   return name.replace(INVALID_CHARS, "").trim();
 }
-function ytdlpDownload(videoId, destFile, format) {
+function ytdlpDownload(videoId, destFile, format, cookiesPath) {
   return new Promise((resolve, reject) => {
+    const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
     const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
+      ...cookiesArgs,
       "--js-runtimes",
       "node",
       "--remote-components",
@@ -627,13 +632,16 @@ function ytdlpDownload(videoId, destFile, format) {
   });
 }
 var Downloader = class {
-  constructor(resolver, discovery) {
+  constructor(resolver, discovery, cookiesPath) {
     this.resolver = resolver;
     this.discovery = discovery;
+    this.cookiesPath = cookiesPath;
   }
   streamAudio(videoId) {
+    const cookiesArgs = this.cookiesPath ? ["--cookies", this.cookiesPath] : [];
     const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
+      ...cookiesArgs,
       "-f",
       "bestaudio",
       "-o",
@@ -667,7 +675,7 @@ var Downloader = class {
         const { unlink } = await import("fs/promises");
         await unlink(dest).catch(() => {
         });
-        await ytdlpDownload(videoId, dest, format);
+        await ytdlpDownload(videoId, dest, format, this.cookiesPath);
       } else {
         throw err;
       }
@@ -1289,8 +1297,8 @@ var MusicKit = class _MusicKit {
     });
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
-      this._stream = new StreamResolver(this.cache, _yt);
-      this._downloader = new Downloader(this._stream, this._discovery);
+      this._stream = new StreamResolver(this.cache, _yt, config.cookiesPath);
+      this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath);
     }
   }
   static async create(config = {}) {
@@ -1326,8 +1334,8 @@ var MusicKit = class _MusicKit {
       }
       const yt = await this._ytPromise;
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, yt);
-      this._downloader = new Downloader(this._stream, this._discovery);
+      this._stream = new StreamResolver(this.cache, yt, this.config.cookiesPath);
+      this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath);
     }
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {

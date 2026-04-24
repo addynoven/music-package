@@ -264,7 +264,7 @@ Cache:        SQLite + diskcache
 Discovery:    node-ytmusic-api (or raw InnerTube calls)
 Resolution:   @distube/ytdl-core
 Playback:     HTML5 <audio> (web) or node-speaker (CLI)
-Cache:        better-sqlite3 + node-cache
+Cache:        node:sqlite (Node 22+ built-in)
 ```
 
 ### Go

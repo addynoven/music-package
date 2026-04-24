@@ -1,34 +1,5 @@
 import { Innertube } from 'youtubei.js';
 
-type EventMap = {
-    beforeRequest: [req: {
-        method: string;
-        endpoint: string;
-        headers: Record<string, string>;
-        body: unknown;
-    }];
-    afterRequest: [req: {
-        method: string;
-        endpoint: string;
-        headers: Record<string, string>;
-        body: unknown;
-    }, durationMs: number, status: number];
-    cacheHit: [key: string, ttlRemaining: number];
-    cacheMiss: [key: string];
-    rateLimited: [endpoint: string, waitMs: number];
-    visitorIdRefreshed: [oldId: string, newId: string];
-    retry: [endpoint: string, attempt: number, reason: string];
-    error: [error: Error];
-};
-type EventName$1 = keyof EventMap;
-type Handler<E extends EventName$1> = (...args: EventMap[E]) => void;
-declare class MusicKitEmitter {
-    private handlers;
-    on<E extends EventName$1>(event: E, handler: Handler<E>): void;
-    off<E extends EventName$1>(event: E, handler: Handler<E>): void;
-    emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
-}
-
 interface Thumbnail {
     url: string;
     width: number;
@@ -73,6 +44,14 @@ interface Playlist {
 interface Section {
     title: string;
     items: (Song | Album | Artist | Playlist)[];
+}
+interface LyricLine {
+    time: number;
+    text: string;
+}
+interface Lyrics {
+    plain: string;
+    synced: LyricLine[] | null;
 }
 interface StreamingData {
     url: string;
@@ -135,7 +114,7 @@ interface CacheConfig {
     ttl?: CacheTTLConfig;
 }
 type SourceName = 'jiosaavn' | 'youtube';
-type SourcePreference = 'default' | 'best' | SourceName[];
+type SourcePreference = 'best' | SourceName[];
 interface MusicKitConfig {
     logLevel?: LogLevel;
     logHandler?: (level: LogLevel, message: string) => void;
@@ -152,6 +131,7 @@ interface MusicKitConfig {
     backoffMax?: number;
     sourceOrder?: SourcePreference;
     cookiesPath?: string;
+    youtubeApiKey?: string;
 }
 interface MusicKitRequest {
     method: string;
@@ -177,6 +157,35 @@ interface MusicKitError extends Error {
     statusCode?: number;
 }
 type MusicKitEvent = 'beforeRequest' | 'afterRequest' | 'cacheHit' | 'cacheMiss' | 'rateLimited' | 'visitorIdRefreshed' | 'retry' | 'error';
+
+type EventMap = {
+    beforeRequest: [req: {
+        method: string;
+        endpoint: string;
+        headers: Record<string, string>;
+        body: unknown;
+    }];
+    afterRequest: [req: {
+        method: string;
+        endpoint: string;
+        headers: Record<string, string>;
+        body: unknown;
+    }, durationMs: number, status: number];
+    cacheHit: [key: string, ttlRemaining: number];
+    cacheMiss: [key: string];
+    rateLimited: [endpoint: string, waitMs: number];
+    visitorIdRefreshed: [oldId: string, newId: string];
+    retry: [endpoint: string, attempt: number, reason: string];
+    error: [error: Error];
+};
+type EventName$1 = keyof EventMap;
+type Handler<E extends EventName$1> = (...args: EventMap[E]) => void;
+declare class MusicKitEmitter {
+    private handlers;
+    on<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    off<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
+}
 
 interface AudioSource {
     readonly name: string;
@@ -265,7 +274,7 @@ declare class MusicKit {
     getRelated(videoId: string): Promise<Song[]>;
     getSuggestions(id: string): Promise<Song[]>;
     getMetadata(id: string): Promise<Song>;
-    getLyrics(id: string): Promise<string | null>;
+    getLyrics(id: string): Promise<Lyrics | null>;
     getCharts(options?: BrowseOptions): Promise<Section[]>;
     download(videoId: string, options?: DownloadOptions$1): Promise<void>;
     streamAudio(id: string): Promise<NodeJS.ReadableStream>;
@@ -282,6 +291,7 @@ declare class Cache {
         readonly HOME: 28800;
         readonly ARTIST: 3600;
         readonly VISITOR_ID: 2592000;
+        readonly LYRICS: 315360000;
     };
     private db;
     private readonly enabled;
@@ -406,4 +416,4 @@ declare function isStreamExpired(stream: StreamingData): boolean;
 
 declare const JIOSAAVN_LANGUAGES: Set<string>;
 
-export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, JIOSAAVN_LANGUAGES, type LogLevel, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type SourceName, type SourcePreference, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };
+export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, JIOSAAVN_LANGUAGES, type LogLevel, type LyricLine, type Lyrics, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type SourceName, type SourcePreference, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };

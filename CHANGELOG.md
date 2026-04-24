@@ -5,6 +5,26 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.0] — 2026-04-25
+
+First stable release. API is considered stable — breaking changes will follow semver from here.
+
+### Summary of what's in v1
+- Unified search, stream, browse, lyrics, and download across **YouTube Music** and **JioSaavn**
+- `MusicKit` class with `search`, `getStream`, `getTrack`, `getMetadata`, `getLyrics`,
+  `getHome`, `getArtist`, `getAlbum`, `getPlaylist`, `getRadio`, `getRelated`,
+  `getSuggestions`, `getFeaturedPlaylists`, `getCharts`, `autocomplete`, `download`
+- Source routing: YouTube-first by default (`sourceOrder: 'best'`), opt-in JioSaavn-first
+  with `sourceOrder: ['jiosaavn', 'youtube']`
+- Per-call source override: `search(q, { source: 'jiosaavn' })`
+- Synced lyrics via LRCLIB + lyrics.ovh fallback — returns `{ plain, synced }` JSON
+- Built-in SQLite cache (`node:sqlite`), rate limiter, retry engine, session manager
+- Optional `youtubeApiKey` for YouTube Data API v3 search backend
+- Optional `cookiesPath` for elevated YouTube rate limits via yt-dlp
+- Zero native addons — runs on any Node ≥ 22 without compilation
+
+---
+
 ## [0.6.0] — 2026-04-25
 
 ### Breaking
@@ -70,8 +90,7 @@ Follows [Semantic Versioning](https://semver.org/).
 - `YouTubeDataAPISource` exported from `musicstream-sdk/sources` for custom pipelines.
 
 ### Changed
-- SQLite backend replaced: `better-sqlite3` (native C++ addon, NODE_MODULE_VERSION issues)
-  removed in favour of Node's built-in `node:sqlite` (`DatabaseSync`). Zero native
+- SQLite cache now uses Node's built-in `node:sqlite` (`DatabaseSync`). Zero native
   compilation — works on any Node 22+ machine without rebuilding.
 - Minimum Node version raised to **22** (`engines: { node: ">=22" }`).
 - GitHub Actions CI updated to Node 22.

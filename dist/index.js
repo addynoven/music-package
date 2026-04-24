@@ -52,7 +52,7 @@ module.exports = __toCommonJS(index_exports);
 var import_youtubei = require("youtubei.js");
 
 // src/cache/index.ts
-var import_node_sqlite = require("sqlite");
+var import_node_sqlite = require("node:sqlite");
 var URL_EXPIRY_BUFFER = 1800;
 var Cache = class {
   constructor(options) {
@@ -110,7 +110,9 @@ Cache.TTL = {
   SEARCH: 300,
   HOME: 28800,
   ARTIST: 3600,
-  VISITOR_ID: 2592e3
+  VISITOR_ID: 2592e3,
+  LYRICS: 31536e4
+  // 10 years — lyrics never change
 };
 
 // src/rate-limiter/index.ts
@@ -377,10 +379,17 @@ var DiscoveryClient = class {
     };
   }
   async autocomplete(query) {
-    const res = await this.yt.music.getSearchSuggestions(query);
-    return res.flatMap(
-      (section) => (section.contents ?? []).map((c) => c.suggestion?.text ?? c.query?.text).filter(Boolean)
-    );
+    const url = new URL("https://suggestqueries.google.com/complete/search");
+    url.searchParams.set("client", "youtube");
+    url.searchParams.set("ds", "yt");
+    url.searchParams.set("q", query);
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const text = await res.text();
+    const match = text.match(/^window\.google\.ac\.h\((.*)\)$/);
+    if (!match) return [];
+    const data = JSON.parse(match[1]);
+    return (data[1] ?? []).map((item) => item[0]);
   }
   async search(query, options) {
     const typeMap = {
@@ -489,11 +498,11 @@ var DiscoveryClient = class {
   async getRelated(videoId) {
     try {
       const res = await this.yt.music.getRelated(videoId);
-      return (res?.contents ?? []).flatMap((s) => s.contents ?? []).map(mapSongItem);
+      return (res?.contents ?? []).flatMap((s) => s.contents ?? []).filter((item) => item?.video_id || item?.id).map(mapSongItem);
     } catch {
       try {
         const res = await this.yt.music.getUpNext(videoId);
-        return (res?.contents ?? []).map(mapSongItem);
+        return (res?.contents ?? []).filter((item) => item?.video_id || item?.id).map(mapSongItem);
       } catch {
         return [];
       }
@@ -768,6 +777,90 @@ var YouTubeMusicSource = class {
   }
   async getMetadata(id) {
     return this.discovery.getInfo(id);
+  }
+};
+
+// src/sources/youtube-data-api.ts
+var YT_API = "https://www.googleapis.com/youtube/v3";
+function parseDuration(iso) {
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 0;
+  return parseInt(m[1] || "0") * 3600 + parseInt(m[2] || "0") * 60 + parseInt(m[3] || "0");
+}
+function mapThumbnails2(thumbs) {
+  return Object.values(thumbs).map((t) => ({ url: t.url, width: t.width, height: t.height }));
+}
+async function ytFetch(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`YouTube Data API error ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+var YouTubeDataAPISource = class {
+  constructor(apiKey, resolver) {
+    this.apiKey = apiKey;
+    this.resolver = resolver;
+    this.name = "youtube-data-api";
+  }
+  canHandle(query) {
+    return !query.startsWith("jio:");
+  }
+  async search(query, options = {}) {
+    if (options.filter && options.filter !== "songs") return [];
+    const maxResults = Math.min(options.limit ?? 10, 50);
+    const searchUrl = new URL(`${YT_API}/search`);
+    searchUrl.searchParams.set("part", "snippet");
+    searchUrl.searchParams.set("q", query);
+    searchUrl.searchParams.set("type", "video");
+    searchUrl.searchParams.set("maxResults", String(maxResults));
+    searchUrl.searchParams.set("key", this.apiKey);
+    const searchData = await ytFetch(searchUrl);
+    const videoIds = searchData.items.filter((item) => item.id?.videoId).map((item) => item.id.videoId);
+    if (videoIds.length === 0) {
+      return options.filter === "songs" ? [] : { songs: [], albums: [], artists: [], playlists: [] };
+    }
+    const videosUrl = new URL(`${YT_API}/videos`);
+    videosUrl.searchParams.set("part", "snippet,contentDetails");
+    videosUrl.searchParams.set("id", videoIds.join(","));
+    videosUrl.searchParams.set("key", this.apiKey);
+    const videosData = await ytFetch(videosUrl);
+    const detailMap = /* @__PURE__ */ new Map();
+    for (const item of videosData.items ?? []) detailMap.set(item.id, item);
+    const songs = videoIds.map((id) => {
+      const detail = detailMap.get(id);
+      if (!detail) return null;
+      return {
+        type: "song",
+        videoId: id,
+        title: detail.snippet.title,
+        artist: detail.snippet.channelTitle,
+        duration: parseDuration(detail.contentDetails?.duration ?? ""),
+        thumbnails: mapThumbnails2(detail.snippet.thumbnails ?? {})
+      };
+    }).filter((s) => s !== null);
+    return options.filter === "songs" ? songs : { songs, albums: [], artists: [], playlists: [] };
+  }
+  async getMetadata(id) {
+    const url = new URL(`${YT_API}/videos`);
+    url.searchParams.set("part", "snippet,contentDetails");
+    url.searchParams.set("id", id);
+    url.searchParams.set("key", this.apiKey);
+    const data = await ytFetch(url);
+    const item = data.items?.[0];
+    if (!item) throw new Error(`Video not found: ${id}`);
+    return {
+      type: "song",
+      videoId: id,
+      title: item.snippet.title,
+      artist: item.snippet.channelTitle,
+      duration: parseDuration(item.contentDetails?.duration ?? ""),
+      thumbnails: mapThumbnails2(item.snippet.thumbnails ?? {})
+    };
+  }
+  async getStream(id, quality = "high") {
+    return this.resolver.resolve(id, quality);
   }
 };
 
@@ -1136,6 +1229,51 @@ var JioSaavnSource = class {
   }
 };
 
+// src/lyrics/lrclib.ts
+async function fetchFromLrclib(artist, title) {
+  try {
+    const params = new URLSearchParams({ artist_name: artist, track_name: title });
+    const res = await fetch(`https://lrclib.net/api/get?${params}`, {
+      headers: { "User-Agent": "musicstream-sdk (https://github.com/addynoven/music-package)" }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.plainLyrics) return null;
+    return {
+      plain: data.plainLyrics.trim(),
+      synced: data.syncedLyrics ? parseLrc(data.syncedLyrics) : null
+    };
+  } catch {
+    return null;
+  }
+}
+function parseLrc(lrc) {
+  const lines = [];
+  for (const line of lrc.split("\n")) {
+    const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/);
+    if (!match) continue;
+    const time = parseInt(match[1], 10) * 60 + parseFloat(match[2]);
+    const text = match[3].trim();
+    if (text) lines.push({ time, text });
+  }
+  return lines;
+}
+
+// src/lyrics/lyrics-ovh.ts
+async function fetchFromLyricsOvh(artist, title) {
+  try {
+    const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const plain = data.lyrics?.trim();
+    if (!plain) return null;
+    return { plain, synced: null };
+  } catch {
+    return null;
+  }
+}
+
 // src/utils/url-resolver.ts
 var JIOSAAVN_RE = /^https?:\/\/(?:www\.)?jiosaavn\.com\//;
 var YTM_BASE = "music.youtube.com";
@@ -1262,9 +1400,8 @@ function rankSongs(songs) {
 function makeReq(endpoint) {
   return { method: "GET", endpoint, headers: {}, body: null };
 }
-function resolveSourceOrder(pref = "default") {
-  if (pref === "default") return ["jiosaavn", "youtube"];
-  if (pref === "best") return ["youtube", "jiosaavn"];
+function resolveSourceOrder(pref) {
+  if (!pref || pref === "best") return ["youtube", "jiosaavn"];
   return pref;
 }
 var MusicKit = class _MusicKit {
@@ -1276,7 +1413,7 @@ var MusicKit = class _MusicKit {
     this._downloader = null;
     this._ytPromise = null;
     this.config = config;
-    this.sourceOrder = resolveSourceOrder(config.sourceOrder ?? "best");
+    this.sourceOrder = resolveSourceOrder(config.sourceOrder);
     const cacheConfig = config.cache ?? {};
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,
@@ -1299,6 +1436,10 @@ var MusicKit = class _MusicKit {
       this._discovery = new DiscoveryClient(_yt);
       this._stream = new StreamResolver(this.cache, _yt, config.cookiesPath);
       this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath);
+    }
+    if (!config.youtubeApiKey && !config.cookiesPath) {
+      const log = config.logHandler ?? ((_, msg) => console.warn(msg));
+      log("warn", "[MusicKit] WARNING: No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.");
     }
   }
   static async create(config = {}) {
@@ -1340,7 +1481,11 @@ var MusicKit = class _MusicKit {
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
         if (name === "jiosaavn") this.sources.push(new JioSaavnSource());
-        if (name === "youtube") this.sources.push(new YouTubeMusicSource(this._discovery, this._stream));
+        if (name === "youtube") {
+          this.sources.push(
+            this.config.youtubeApiKey ? new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream) : new YouTubeMusicSource(this._discovery, this._stream)
+          );
+        }
       }
     }
   }
@@ -1367,10 +1512,15 @@ var MusicKit = class _MusicKit {
     this.emitter.off(event, handler);
   }
   async autocomplete(query) {
-    await this.ensureClients();
     const resolved = resolveInput(query);
     if (resolved.startsWith("jio:")) return [];
-    return this.call("autocomplete", () => this._discovery.autocomplete(resolved));
+    const cacheKey = `autocomplete:${resolved}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    await this.ensureClients();
+    const result = await this.call("autocomplete", () => this._discovery.autocomplete(resolved));
+    this.cache.set(cacheKey, result, 60);
+    return result;
   }
   async search(query, options) {
     const resolved = resolveInput(query);
@@ -1424,105 +1574,158 @@ var MusicKit = class _MusicKit {
   async getHome(options) {
     await this.ensureClients();
     const lang = options?.language;
+    const cacheKey = `home:${lang ?? "default"}:${options?.source ?? "auto"}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    let result;
     if (options?.source === "youtube") {
-      return this.call("browse", () => this._discovery.getHome());
-    }
-    if (options?.source === "jiosaavn") {
+      result = await this.call("browse", () => this._discovery.getHome());
+    } else if (options?.source === "jiosaavn") {
       const src = this.sources.find((s) => s.name === "jiosaavn" && s.getHome);
-      if (src) return this.call("browse", () => src.getHome(lang));
-      return [];
+      result = src ? await this.call("browse", () => src.getHome(lang)) : [];
+    } else {
+      const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang);
+      if (useJio) {
+        const src = this.sources.find((s) => s.getHome);
+        result = src ? await this.call("browse", () => src.getHome(lang)) : await this.call("browse", () => this._discovery.getHome());
+      } else {
+        result = await this.call("browse", () => this._discovery.getHome());
+      }
     }
-    const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang);
-    if (useJio) {
-      const src = this.sources.find((s) => s.getHome);
-      if (src) return this.call("browse", () => src.getHome(lang));
-    }
-    return this.call("browse", () => this._discovery.getHome());
+    this.cache.set(cacheKey, result, Cache.TTL.HOME);
+    return result;
   }
   async getFeaturedPlaylists(options) {
     await this.ensureClients();
+    const cacheKey = `featured:${options?.language ?? "default"}:${options?.source ?? "auto"}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
     const targetName = options?.source === "youtube" ? "youtube-music" : options?.source === "jiosaavn" ? "jiosaavn" : null;
     const src = targetName ? this.sources.find((s) => s.name === targetName && s.getFeaturedPlaylists) : this.sources.find((s) => s.getFeaturedPlaylists);
-    if (src) return this.call("browse", () => src.getFeaturedPlaylists(options?.language));
-    return [];
+    const result = src ? await this.call("browse", () => src.getFeaturedPlaylists(options?.language)) : [];
+    if (result.length > 0) this.cache.set(cacheKey, result, Cache.TTL.HOME);
+    return result;
   }
   async getArtist(channelId) {
     await this.ensureClients();
     const id = resolveInput(channelId);
-    if (id.startsWith("jio:")) {
+    const cacheKey = `artist:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = id.startsWith("jio:") ? await (async () => {
       const src = this.sourceFor(id);
       if (src.getArtist) return this.call("browse", () => src.getArtist(id));
-    }
-    return this.call("browse", () => this._discovery.getArtist(id));
+      return this.call("browse", () => this._discovery.getArtist(id));
+    })() : await this.call("browse", () => this._discovery.getArtist(id));
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
+    return result;
   }
   async getAlbum(browseId) {
     await this.ensureClients();
     const id = resolveInput(browseId);
-    if (id.startsWith("jio:")) {
+    const cacheKey = `album:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = id.startsWith("jio:") ? await (async () => {
       const src = this.sourceFor(id);
       if (src.getAlbum) return this.call("browse", () => src.getAlbum(id));
-    }
-    return this.call("browse", () => this._discovery.getAlbum(id));
+      return this.call("browse", () => this._discovery.getAlbum(id));
+    })() : await this.call("browse", () => this._discovery.getAlbum(id));
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
+    return result;
   }
   async getPlaylist(playlistId) {
     await this.ensureClients();
     const id = resolveInput(playlistId);
-    if (id.startsWith("jio:")) {
+    const cacheKey = `playlist:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = id.startsWith("jio:") ? await (async () => {
       const src = this.sourceFor(id);
       if (src.getPlaylist) return this.call("browse", () => src.getPlaylist(id));
-    }
-    return this.call("browse", () => this._discovery.getPlaylist(id));
+      return this.call("browse", () => this._discovery.getPlaylist(id));
+    })() : await this.call("browse", () => this._discovery.getPlaylist(id));
+    this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
+    return result;
   }
   async getRadio(videoId) {
     await this.ensureClients();
     const id = resolveInput(videoId);
-    if (id.startsWith("jio:")) {
+    const cacheKey = `radio:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = id.startsWith("jio:") ? await (async () => {
       const src = this.sourceFor(id);
       if (src.getRadio) return this.call("browse", () => src.getRadio(id));
-    }
-    return this.call("browse", () => this._discovery.getRadio(id));
+      return this.call("browse", () => this._discovery.getRadio(id));
+    })() : await this.call("browse", () => this._discovery.getRadio(id));
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+    return result;
   }
   async getRelated(videoId) {
     await this.ensureClients();
     const id = resolveInput(videoId);
-    return this.call("browse", () => this._discovery.getRelated(id));
+    const cacheKey = `related:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = await this.call("browse", () => this._discovery.getRelated(id));
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+    return result;
   }
   async getSuggestions(id) {
     await this.ensureClients();
     const resolved = resolveInput(id);
+    const cacheKey = `suggestions:${resolved}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    let result;
     if (resolved.startsWith("jio:")) {
       const src = this.sourceFor(resolved);
       try {
-        const meta = await src.getMetadata(resolved);
+        const meta = await this.getMetadata(resolved);
         const query = `${meta.title} ${meta.artist}`;
-        const ytSongs = await this._discovery.search(query, { filter: "songs" });
+        const ytSongs = await this.search(query, { filter: "songs" });
         const ytId = ytSongs[0]?.videoId;
         if (ytId) {
-          return await this._discovery.getRelated(ytId);
+          result = await this.getRelated(ytId);
+          this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+          return result;
         }
       } catch {
       }
-      if (src.getRadio) return this.call("browse", () => src.getRadio(resolved));
-      return [];
+      result = src.getRadio ? await this.call("browse", () => src.getRadio(resolved)) : [];
+    } else {
+      result = await this.getRelated(resolved);
     }
-    return this.call("browse", () => this._discovery.getRelated(resolved));
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+    return result;
   }
   async getMetadata(id) {
     await this.ensureClients();
     const resolved = resolveInput(id);
-    if (resolved.startsWith("jio:")) {
-      return this.call("browse", () => this.sourceFor(resolved).getMetadata(resolved));
-    }
-    return this.call("browse", () => this._discovery.getInfo(resolved));
+    const cacheKey = `metadata:${resolved}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const result = resolved.startsWith("jio:") ? await this.call("browse", () => this.sourceFor(resolved).getMetadata(resolved)) : await this.call("browse", () => this._discovery.getInfo(resolved));
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
+    return result;
   }
   async getLyrics(id) {
     await this.ensureClients();
     const resolved = resolveInput(id);
-    if (resolved.startsWith("jio:")) {
-      const src = this.sourceFor(resolved);
-      if (src.getLyrics) return src.getLyrics(resolved);
+    const cacheKey = `lyrics:${resolved}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached !== null) return cached;
+    let lyrics = null;
+    try {
+      const meta = await this.getMetadata(resolved);
+      const artist = sanitizeArtist(meta.artist);
+      const title = sanitizeTitle(meta.title);
+      lyrics = await fetchFromLrclib(artist, title) ?? await fetchFromLyricsOvh(artist, title);
+    } catch {
     }
-    return null;
+    if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS);
+    return lyrics;
   }
   async getCharts(options) {
     await this.ensureClients();
@@ -1553,6 +1756,16 @@ var MusicKit = class _MusicKit {
     return this._downloader.streamAudio(resolved);
   }
 };
+var TITLE_NOISE2 = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi;
+var ARTIST_NOISE = /\s*([-–—].*|VEVO|Official|Music|Records?|Productions?)$/i;
+function sanitizeTitle(t) {
+  const dash = t.indexOf(" - ");
+  const cleaned = dash !== -1 ? t.slice(dash + 3) : t;
+  return cleaned.replace(TITLE_NOISE2, "").trim();
+}
+function sanitizeArtist(a) {
+  return a.replace(ARTIST_NOISE, "").trim();
+}
 
 // src/models/index.ts
 var SearchFilter = {

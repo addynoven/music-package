@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 
 interface CacheOptions {
   enabled: boolean
@@ -16,14 +16,14 @@ export class Cache {
     VISITOR_ID: 2_592_000,
   } as const
 
-  private db: Database.Database | null = null
+  private db: DatabaseSync | null = null
   private readonly enabled: boolean
 
   constructor(options: CacheOptions) {
     this.enabled = options.enabled
     if (!this.enabled) return
 
-    this.db = new Database(options.path ?? ':memory:')
+    this.db = new DatabaseSync(options.path ?? ':memory:')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS cache (
         key TEXT PRIMARY KEY,

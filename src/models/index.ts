@@ -144,6 +144,7 @@ export interface MusicKitConfig {
   backoffMax?: number
   sourceOrder?: SourcePreference
   cookiesPath?: string
+  youtubeApiKey?: string
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

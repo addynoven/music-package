@@ -8,6 +8,7 @@ import { StreamResolver } from '../stream'
 import { Downloader } from '../downloader'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
+import { YouTubeDataAPISource } from '../sources/youtube-data-api'
 import { JioSaavnSource, JIOSAAVN_LANGUAGES } from '../sources/jiosaavn'
 import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
@@ -87,6 +88,11 @@ export class MusicKit {
       this._stream = new StreamResolver(this.cache, _yt, config.cookiesPath)
       this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath)
     }
+
+    if (!config.youtubeApiKey && !config.cookiesPath) {
+      const log = config.logHandler ?? ((_, msg) => console.warn(msg))
+      log('warn', '[MusicKit] WARNING: No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.')
+    }
   }
 
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
@@ -131,7 +137,13 @@ export class MusicKit {
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
         if (name === 'jiosaavn') this.sources.push(new JioSaavnSource())
-        if (name === 'youtube') this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+        if (name === 'youtube') {
+          this.sources.push(
+            this.config.youtubeApiKey
+              ? new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream!)
+              : new YouTubeMusicSource(this._discovery!, this._stream!),
+          )
+        }
       }
     }
   }

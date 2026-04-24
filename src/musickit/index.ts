@@ -366,25 +366,34 @@ export class MusicKit {
   async getSuggestions(id: string): Promise<Song[]> {
     await this.ensureClients()
     const resolved = resolveInput(id)
+    const cacheKey = `suggestions:${resolved}`
+    const cached = this.cache.get<Song[]>(cacheKey)
+    if (cached) return cached
+
+    let result: Song[]
 
     if (resolved.startsWith('jio:')) {
       const src = this.sourceFor(resolved)
       try {
-        const meta = await src.getMetadata(resolved)
+        const meta = await this.getMetadata(resolved)
         const query = `${meta.title} ${meta.artist}`
-        const ytSongs = await this._discovery!.search(query, { filter: 'songs' }) as Song[]
+        const ytSongs = await this.search(query, { filter: 'songs' }) as Song[]
         const ytId = ytSongs[0]?.videoId
         if (ytId) {
-          return await this._discovery!.getRelated(ytId)
+          result = await this.getRelated(ytId)
+          this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
+          return result
         }
       } catch {
         // fall through to JioSaavn radio
       }
-      if (src.getRadio) return this.call('browse', () => src.getRadio!(resolved))
-      return []
+      result = src.getRadio ? await this.call('browse', () => src.getRadio!(resolved)) : []
+    } else {
+      result = await this.getRelated(resolved)
     }
 
-    return this.call('browse', () => this._discovery!.getRelated(resolved))
+    this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
+    return result
   }
 
   async getMetadata(id: string): Promise<Song> {

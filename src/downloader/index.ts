@@ -21,10 +21,12 @@ function sanitize(name: string): string {
   return name.replace(INVALID_CHARS, '').trim()
 }
 
-function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat): Promise<void> {
+function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat, cookiesPath?: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    const cookiesArgs = cookiesPath ? ['--cookies', cookiesPath] : []
     const proc = spawn('yt-dlp', [
       '--no-playlist',
+      ...cookiesArgs,
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
       '-f', format === 'm4a' ? 'bestaudio[ext=m4a]/bestaudio' : 'bestaudio[ext=webm]/bestaudio',
@@ -46,11 +48,14 @@ export class Downloader {
   constructor(
     private readonly resolver: StreamResolver,
     private readonly discovery: DiscoveryClient,
+    private readonly cookiesPath?: string,
   ) {}
 
   streamAudio(videoId: string): NodeJS.ReadableStream {
+    const cookiesArgs = this.cookiesPath ? ['--cookies', this.cookiesPath] : []
     const proc = spawn('yt-dlp', [
       '--no-playlist',
+      ...cookiesArgs,
       '-f', 'bestaudio',
       '-o', '-',
       `https://music.youtube.com/watch?v=${videoId}`,
@@ -91,7 +96,7 @@ export class Downloader {
       if (err.message?.includes('403') || err.message?.includes('audio fetch failed')) {
         const { unlink } = await import('node:fs/promises')
         await unlink(dest).catch(() => {})
-        await ytdlpDownload(videoId, dest, format)
+        await ytdlpDownload(videoId, dest, format, this.cookiesPath)
       } else {
         throw err
       }

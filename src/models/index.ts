@@ -143,6 +143,7 @@ export interface MusicKitConfig {
   backoffBase?: number
   backoffMax?: number
   sourceOrder?: SourcePreference
+  cookiesPath?: string
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

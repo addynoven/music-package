@@ -41,12 +41,14 @@ describe('Downloader', () => {
       body: new ReadableStream({ start(c) { c.close() } }),
     }))
     // Default write stream: fires 'finish' immediately so fetchAndWrite resolves
-    ;(createWriteStream as any).mockReturnValue({
+    const makeWriteStream = () => ({
       write: vi.fn(),
       end: vi.fn(),
       destroy: vi.fn(),
-      on: vi.fn((event: string, cb: Function) => { if (event === 'finish') cb() }),
+      on: vi.fn(),
+      once: vi.fn((event: string, cb: Function) => { if (event === 'finish') cb() }),
     })
+    ;(createWriteStream as any).mockReturnValue(makeWriteStream())
   })
 
   afterEach(() => {
@@ -64,7 +66,7 @@ describe('Downloader', () => {
       const writtenPaths: string[] = []
       ;(createWriteStream as any).mockImplementation((p: string) => {
         writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
+        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
       })
 
       await downloader.download(song.videoId, { path: tmpDir, format: 'opus', _mockSong: song })
@@ -80,7 +82,7 @@ describe('Downloader', () => {
       const writtenPaths: string[] = []
       ;(createWriteStream as any).mockImplementation((p: string) => {
         writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
+        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
       })
 
       await downloader.download(song.videoId, { path: tmpDir, _mockSong: song })
@@ -98,7 +100,7 @@ describe('Downloader', () => {
       const writtenPaths: string[] = []
       ;(createWriteStream as any).mockImplementation((p: string) => {
         writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
+        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
       })
 
       await downloader.download(song.videoId, { path: tmpDir, _mockSong: song })
@@ -112,7 +114,7 @@ describe('Downloader', () => {
   describe('format selection', () => {
     it('requests opus quality from the stream resolver for opus format', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData())
-      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
+      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
 
       await downloader.download('dQw4w9WgXcQ', { path: tmpDir, format: 'opus' })
 
@@ -121,7 +123,7 @@ describe('Downloader', () => {
 
     it('requests m4a quality from the stream resolver for m4a format', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ codec: 'mp4a' }))
-      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
+      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
 
       await downloader.download('dQw4w9WgXcQ', { path: tmpDir, format: 'm4a' })
 

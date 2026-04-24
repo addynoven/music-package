@@ -134,6 +134,8 @@ interface CacheConfig {
     enabled?: boolean;
     ttl?: CacheTTLConfig;
 }
+type SourceName = 'jiosaavn' | 'youtube';
+type SourcePreference = 'default' | 'best' | SourceName[];
 interface MusicKitConfig {
     logLevel?: LogLevel;
     logHandler?: (level: LogLevel, message: string) => void;
@@ -148,6 +150,7 @@ interface MusicKitConfig {
     maxRetries?: number;
     backoffBase?: number;
     backoffMax?: number;
+    sourceOrder?: SourcePreference;
 }
 interface MusicKitRequest {
     method: string;
@@ -202,6 +205,7 @@ declare class MusicKit {
     private readonly session;
     private readonly emitter;
     private readonly searchCache;
+    private readonly sourceOrder;
     readonly sources: AudioSource[];
     private _discovery;
     private _stream;
@@ -219,22 +223,27 @@ declare class MusicKit {
     search(query: string, options: {
         filter: 'songs';
         limit?: number;
+        source?: SourceName;
     }): Promise<Song[]>;
     search(query: string, options: {
         filter: 'albums';
         limit?: number;
+        source?: SourceName;
     }): Promise<Album[]>;
     search(query: string, options: {
         filter: 'artists';
         limit?: number;
+        source?: SourceName;
     }): Promise<Artist[]>;
     search(query: string, options: {
         filter: 'playlists';
         limit?: number;
+        source?: SourceName;
     }): Promise<Playlist[]>;
     search(query: string, options?: {
         filter?: SearchFilter;
         limit?: number;
+        source?: SourceName;
     }): Promise<SearchResults>;
     getStream(videoId: string, options?: {
         quality?: Quality;
@@ -242,9 +251,11 @@ declare class MusicKit {
     getTrack(videoId: string): Promise<AudioTrack>;
     getHome(options?: {
         language?: string;
+        source?: SourceName;
     }): Promise<Section[]>;
     getFeaturedPlaylists(options?: {
         language?: string;
+        source?: SourceName;
     }): Promise<Playlist[]>;
     getArtist(channelId: string): Promise<Artist>;
     getAlbum(browseId: string): Promise<Album>;
@@ -256,6 +267,7 @@ declare class MusicKit {
     getLyrics(id: string): Promise<string | null>;
     getCharts(options?: BrowseOptions): Promise<Section[]>;
     download(videoId: string, options?: DownloadOptions$1): Promise<void>;
+    streamAudio(id: string): Promise<NodeJS.ReadableStream>;
 }
 
 interface CacheOptions {
@@ -351,7 +363,7 @@ declare class DiscoveryClient {
 
 declare class StreamResolver {
     private readonly cache;
-    private readonly yt;
+    readonly yt: Innertube;
     constructor(cache: Cache, yt: Innertube);
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
@@ -371,6 +383,7 @@ declare class Downloader {
     private readonly resolver;
     private readonly discovery;
     constructor(resolver: StreamResolver, discovery: DiscoveryClient);
+    streamAudio(videoId: string): NodeJS.ReadableStream;
     download(videoId: string, options?: DownloadOptions): Promise<void>;
     private fetchAndWrite;
     private readWithProgress;
@@ -390,4 +403,4 @@ declare function isStreamExpired(stream: StreamingData): boolean;
 
 declare const JIOSAAVN_LANGUAGES: Set<string>;
 
-export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, JIOSAAVN_LANGUAGES, type LogLevel, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };
+export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, JIOSAAVN_LANGUAGES, type LogLevel, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type SourceName, type SourcePreference, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };

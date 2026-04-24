@@ -512,6 +512,7 @@ var DiscoveryClient = class {
 };
 
 // src/stream/index.ts
+var import_node_child_process = require("child_process");
 var import_agnostic = require("youtubei.js/agnostic");
 function patchEvalIfNeeded() {
   try {
@@ -528,15 +529,46 @@ function patchEvalIfNeeded() {
   } catch {
   }
 }
-function parseCodec(mimeType) {
-  return mimeType.includes("opus") ? "opus" : "mp4a";
-}
 function parseExpiry(url) {
   try {
     return parseInt(new URL(url).searchParams.get("expire") ?? "0", 10);
   } catch {
     return 0;
   }
+}
+function ytdlpResolve(videoId, quality) {
+  return new Promise((resolve, reject) => {
+    const formatSelector = quality === "low" ? "worstaudio" : "bestaudio";
+    (0, import_node_child_process.execFile)("yt-dlp", [
+      "--no-playlist",
+      "--dump-json",
+      "-f",
+      formatSelector,
+      `https://music.youtube.com/watch?v=${videoId}`
+    ], (err, stdout) => {
+      if (err) {
+        reject(new Error(`yt-dlp failed: ${(err.stderr ?? String(err)).slice(0, 200)}`));
+        return;
+      }
+      try {
+        const json = JSON.parse(stdout);
+        const url = json.url;
+        const acodec = json.acodec ?? "";
+        const codec = acodec.includes("opus") ? "opus" : "mp4a";
+        const bitrateKbps = json.abr ?? json.tbr ?? 0;
+        const sizeBytes = json.filesize ?? json.filesize_approx ?? void 0;
+        resolve({
+          url,
+          codec,
+          bitrate: Math.round(bitrateKbps * 1e3),
+          expiresAt: parseExpiry(url),
+          ...sizeBytes != null && { sizeBytes }
+        });
+      } catch (parseErr) {
+        reject(new Error(`Failed to parse yt-dlp output: ${parseErr}`));
+      }
+    });
+  });
 }
 var StreamResolver = class {
   constructor(cache, yt) {
@@ -552,22 +584,7 @@ var StreamResolver = class {
     if (cached && !this.cache.isUrlExpired(cached.url)) {
       return cached;
     }
-    const info = await this.yt.music.getInfo(videoId);
-    const formats = info.streaming_data?.adaptive_formats ?? [];
-    const audioFmts = formats.filter((f) => f.has_audio && !f.has_video);
-    if (!audioFmts.length) {
-      throw new Error(`No audio formats found for videoId: ${videoId}`);
-    }
-    const fmt = q === "high" ? audioFmts.sort((a, b) => b.bitrate - a.bitrate)[0] : audioFmts.sort((a, b) => a.bitrate - b.bitrate)[0];
-    const url = await fmt.decipher(this.yt.session.player);
-    const data = {
-      url,
-      codec: parseCodec(fmt.mime_type ?? ""),
-      bitrate: fmt.bitrate ?? 0,
-      expiresAt: parseExpiry(url),
-      ...fmt.loudness_db !== void 0 && { loudnessDb: fmt.loudness_db },
-      ...fmt.content_length !== void 0 && { sizeBytes: parseInt(fmt.content_length, 10) }
-    };
+    const data = await ytdlpResolve(videoId, q);
     this.cache.set(cacheKey, data, Cache.TTL.STREAM);
     return data;
   }
@@ -576,14 +593,14 @@ var StreamResolver = class {
 // src/downloader/index.ts
 var import_node_fs = require("fs");
 var import_node_path = require("path");
-var import_node_child_process = require("child_process");
+var import_node_child_process2 = require("child_process");
 var INVALID_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
 function sanitize(name) {
   return name.replace(INVALID_CHARS, "").trim();
 }
 function ytdlpDownload(videoId, destFile, format) {
   return new Promise((resolve, reject) => {
-    const proc = (0, import_node_child_process.spawn)("yt-dlp", [
+    const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
       "--js-runtimes",
       "node",
@@ -602,6 +619,7 @@ function ytdlpDownload(videoId, destFile, format) {
     proc.stderr.on("data", (d) => {
       err += d;
     });
+    proc.on("error", (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)));
     proc.on("close", (code) => {
       if (code !== 0) reject(new Error(`yt-dlp download failed: ${err.slice(0, 200)}`));
       else resolve();
@@ -612,6 +630,18 @@ var Downloader = class {
   constructor(resolver, discovery) {
     this.resolver = resolver;
     this.discovery = discovery;
+  }
+  streamAudio(videoId) {
+    const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
+      "--no-playlist",
+      "-f",
+      "bestaudio",
+      "-o",
+      "-",
+      `https://music.youtube.com/watch?v=${videoId}`
+    ]);
+    proc.stderr.resume();
+    return proc.stdout;
   }
   async download(videoId, options = {}) {
     const format = options.format ?? "opus";
@@ -626,6 +656,8 @@ var Downloader = class {
       const writeStream2 = (0, import_node_fs.createWriteStream)(dest);
       return this.readWithProgress(options._mockReadStream, writeStream2, stream.sizeBytes, options.onProgress);
     }
+    const { mkdir } = await import("fs/promises");
+    await mkdir(options.path ?? ".", { recursive: true });
     const writeStream = (0, import_node_fs.createWriteStream)(dest);
     try {
       await this.fetchAndWrite(stream.url, writeStream, stream.sizeBytes, options.onProgress);
@@ -656,6 +688,10 @@ var Downloader = class {
     const readable = Readable.fromWeb(response.body);
     return new Promise((resolve, reject) => {
       let downloaded = 0;
+      writeStream.on("error", (err) => {
+        writeStream.destroy();
+        reject(err);
+      });
       readable.on("data", (chunk) => {
         writeStream.write(chunk);
         downloaded += chunk.length;
@@ -669,8 +705,7 @@ var Downloader = class {
       });
       readable.on("end", () => {
         writeStream.end();
-        writeStream.on("finish", resolve);
-        writeStream.on("error", reject);
+        writeStream.once("finish", resolve);
       });
     });
   }
@@ -714,8 +749,8 @@ var YouTubeMusicSource = class {
     this.resolver = resolver;
     this.name = "youtube-music";
   }
-  canHandle(_query) {
-    return true;
+  canHandle(query) {
+    return !query.startsWith("jio:");
   }
   async search(query, options = {}) {
     return this.discovery.search(query, options);
@@ -1168,9 +1203,61 @@ function isStreamExpired(stream) {
   return Math.floor(Date.now() / 1e3) > stream.expiresAt - EXPIRY_BUFFER_SECONDS;
 }
 
+// src/discovery/ranker.ts
+var TITLE_NOISE = /\b(live|cover|remix|karaoke|tribute|instrumental|acoustic|demo|remaster|bamboo|anniversary)\b/i;
+var ALBUM_NOISE = /\b(party|mix|hits|summer|workout|greatest|essential|ultimate|collection)\b/i;
+function titleScore(title) {
+  return TITLE_NOISE.test(title) ? 0 : 1;
+}
+function albumScore(album) {
+  if (!album) return 1;
+  return ALBUM_NOISE.test(album) ? 0 : 1;
+}
+function dominantCleanArtist(songs) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const s of songs) {
+    if (titleScore(s.title) === 0) continue;
+    const key = s.artist.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let max = 0;
+  let dominant = "";
+  for (const [artist, count] of counts) {
+    if (count > max) {
+      max = count;
+      dominant = artist;
+    }
+  }
+  return dominant;
+}
+function rankSongs(songs) {
+  if (songs.length === 0) return [];
+  const buckets = songs.map((s) => s.duration ? Math.round(s.duration / 10) : null);
+  const validBuckets = buckets.filter((b) => b !== null);
+  const mean = validBuckets.length ? validBuckets.reduce((a, b) => a + b, 0) / validBuckets.length : 0;
+  const variance = validBuckets.length ? validBuckets.reduce((sum, b) => sum + (b - mean) ** 2, 0) / validBuckets.length : 0;
+  const stdDev = Math.sqrt(variance) || 1;
+  const dominant = dominantCleanArtist(songs);
+  const scored = songs.map((s, i) => {
+    const ts = titleScore(s.title) * 0.4;
+    const b = buckets[i] ?? mean;
+    const z = Math.abs(b - mean) / stdDev;
+    const ds = Math.max(0, 1 - z / 2) * 0.35;
+    const as = albumScore(s.album) * 0.15;
+    const artistBoost = dominant && s.artist.toLowerCase() === dominant ? 0.1 : 0;
+    return { song: s, score: ts + ds + as + artistBoost };
+  });
+  return scored.sort((a, b) => b.score - a.score).map((s) => s.song);
+}
+
 // src/musickit/index.ts
 function makeReq(endpoint) {
   return { method: "GET", endpoint, headers: {}, body: null };
+}
+function resolveSourceOrder(pref = "default") {
+  if (pref === "default") return ["jiosaavn", "youtube"];
+  if (pref === "best") return ["youtube", "jiosaavn"];
+  return pref;
 }
 var MusicKit = class _MusicKit {
   constructor(config = {}, _yt) {
@@ -1181,6 +1268,7 @@ var MusicKit = class _MusicKit {
     this._downloader = null;
     this._ytPromise = null;
     this.config = config;
+    this.sourceOrder = resolveSourceOrder(config.sourceOrder ?? "best");
     const cacheConfig = config.cache ?? {};
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,
@@ -1216,7 +1304,13 @@ var MusicKit = class _MusicKit {
   registerSource(source) {
     this.sources.push(source);
   }
-  sourceFor(query) {
+  sourceFor(query, override) {
+    if (override) {
+      const targetName = override === "youtube" ? "youtube-music" : "jiosaavn";
+      const found = this.sources.find((s) => s.name === targetName);
+      if (!found) throw new Error(`Source '${override}' is not registered \u2014 check your sourceOrder config`);
+      return found;
+    }
     const source = this.sources.find((s) => s.canHandle(query));
     if (!source) throw new Error(`No source can handle: ${query}`);
     return source;
@@ -1236,8 +1330,10 @@ var MusicKit = class _MusicKit {
       this._downloader = new Downloader(this._stream, this._discovery);
     }
     if (this.sources.length === 0) {
-      this.sources.push(new JioSaavnSource());
-      this.sources.push(new YouTubeMusicSource(this._discovery, this._stream));
+      for (const name of this.sourceOrder) {
+        if (name === "jiosaavn") this.sources.push(new JioSaavnSource());
+        if (name === "youtube") this.sources.push(new YouTubeMusicSource(this._discovery, this._stream));
+      }
     }
   }
   async call(endpoint, fn) {
@@ -1270,7 +1366,7 @@ var MusicKit = class _MusicKit {
   }
   async search(query, options) {
     const resolved = resolveInput(query);
-    const cacheKey = `search:${resolved}:${options?.filter ?? "all"}:${options?.limit ?? "default"}`;
+    const cacheKey = `search:${resolved}:${options?.filter ?? "all"}:${options?.limit ?? "default"}:${options?.source ?? "auto"}`;
     const inMemory = this.searchCache.get(cacheKey);
     if (inMemory !== void 0) {
       this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
@@ -1285,7 +1381,10 @@ var MusicKit = class _MusicKit {
     this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("search", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
-    const result = await this.call("search", () => this.sourceFor(resolved).search(resolved, options ?? {}));
+    const { source: sourceOverride, ...searchOpts } = options ?? {};
+    const raw = await this.call("search", () => this.sourceFor(resolved, sourceOverride).search(resolved, searchOpts));
+    const isJioResults = (songs) => songs.length > 0 && songs[0].videoId.startsWith("jio:");
+    const result = options?.filter === "songs" ? isJioResults(raw) ? rankSongs(raw) : raw : !Array.isArray(raw) ? isJioResults(raw.songs) ? { ...raw, songs: rankSongs(raw.songs) } : raw : raw;
     this.searchCache.set(cacheKey, result);
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
@@ -1317,6 +1416,14 @@ var MusicKit = class _MusicKit {
   async getHome(options) {
     await this.ensureClients();
     const lang = options?.language;
+    if (options?.source === "youtube") {
+      return this.call("browse", () => this._discovery.getHome());
+    }
+    if (options?.source === "jiosaavn") {
+      const src = this.sources.find((s) => s.name === "jiosaavn" && s.getHome);
+      if (src) return this.call("browse", () => src.getHome(lang));
+      return [];
+    }
     const useJio = !lang || JIOSAAVN_LANGUAGES.has(lang);
     if (useJio) {
       const src = this.sources.find((s) => s.getHome);
@@ -1326,7 +1433,8 @@ var MusicKit = class _MusicKit {
   }
   async getFeaturedPlaylists(options) {
     await this.ensureClients();
-    const src = this.sources.find((s) => s.getFeaturedPlaylists);
+    const targetName = options?.source === "youtube" ? "youtube-music" : options?.source === "jiosaavn" ? "jiosaavn" : null;
+    const src = targetName ? this.sources.find((s) => s.name === targetName && s.getFeaturedPlaylists) : this.sources.find((s) => s.getFeaturedPlaylists);
     if (src) return this.call("browse", () => src.getFeaturedPlaylists(options?.language));
     return [];
   }
@@ -1414,7 +1522,27 @@ var MusicKit = class _MusicKit {
   }
   async download(videoId, options) {
     await this.ensureClients();
-    return this._downloader.download(resolveInput(videoId), options);
+    let id = resolveInput(videoId);
+    if (id.startsWith("jio:")) {
+      const meta = await this.sourceFor(id).getMetadata(id);
+      const ytSongs = await this._discovery.search(`${meta.title} ${meta.artist}`, { filter: "songs" });
+      const match = ytSongs.find((s) => s.videoId && !s.videoId.startsWith("jio:"));
+      if (!match?.videoId) throw new Error(`No downloadable YouTube equivalent found for: ${id}`);
+      id = match.videoId;
+    }
+    return this._downloader.download(id, options);
+  }
+  async streamAudio(id) {
+    await this.ensureClients();
+    const resolved = resolveInput(id);
+    if (resolved.startsWith("jio:")) {
+      const streamData = await this.call("stream", () => this.sourceFor(resolved).getStream(resolved, "high"));
+      const response = await fetch(streamData.url);
+      if (!response.ok) throw new Error(`Stream fetch failed: ${response.status}`);
+      const { Readable } = await import("stream");
+      return Readable.fromWeb(response.body);
+    }
+    return this._downloader.streamAudio(resolved);
   }
 };
 

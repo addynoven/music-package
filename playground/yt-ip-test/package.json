@@ -1,0 +1,8 @@
+{
+  "name": "yt-ip-test",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12"
+  }
+}

@@ -136,7 +136,7 @@ export interface CacheConfig {
 }
 
 export type SourceName = 'jiosaavn' | 'youtube'
-export type SourcePreference = 'default' | 'best' | SourceName[]
+export type SourcePreference = 'best' | SourceName[]
 
 export interface MusicKitConfig {
   logLevel?: LogLevel

@@ -42,9 +42,8 @@ function makeReq(endpoint: string): MusicKitRequest {
   return { method: 'GET', endpoint, headers: {}, body: null }
 }
 
-function resolveSourceOrder(pref: SourcePreference = 'default'): SourceName[] {
-  if (pref === 'default') return ['jiosaavn', 'youtube']
-  if (pref === 'best') return ['youtube', 'jiosaavn']
+function resolveSourceOrder(pref?: SourcePreference): SourceName[] {
+  if (!pref || pref === 'best') return ['youtube', 'jiosaavn']
   return pref
 }
 
@@ -66,7 +65,7 @@ export class MusicKit {
 
   constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
     this.config = config
-    this.sourceOrder = resolveSourceOrder(config.sourceOrder ?? 'best')
+    this.sourceOrder = resolveSourceOrder(config.sourceOrder)
     const cacheConfig = config.cache ?? {}
     this.cache = new Cache({
       enabled: cacheConfig.enabled ?? true,

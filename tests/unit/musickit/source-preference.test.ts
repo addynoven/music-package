@@ -82,16 +82,16 @@ describe('MusicKit — sourceOrder config', () => {
     })
   })
 
-  describe('"default" preset — JioSaavn first (opt-in for regional apps)', () => {
+  describe("['jiosaavn', 'youtube'] — JioSaavn first (opt-in for regional apps)", () => {
     it('routes a plain-text search to JioSaavn', async () => {
-      const mk = new MusicKit({ sourceOrder: 'default' })
+      const mk = new MusicKit({ sourceOrder: ['jiosaavn', 'youtube'] })
       await mk.search('hips dont lie', { filter: 'songs' })
       expect(mockJioSource.search).toHaveBeenCalled()
       expect(mockYtSource.search).not.toHaveBeenCalled()
     })
 
     it('registers JioSaavn as sources[0]', async () => {
-      const mk = new MusicKit({ sourceOrder: 'default' })
+      const mk = new MusicKit({ sourceOrder: ['jiosaavn', 'youtube'] })
       await mk.search('test')
       expect(mk.sources[0].name).toBe('jiosaavn')
     })

@@ -64,6 +64,31 @@ export class Downloader {
     return proc.stdout
   }
 
+
+  streamPCM(videoId: string): NodeJS.ReadableStream {
+    const cookiesArgs = this.cookiesPath ? ['--cookies', this.cookiesPath] : []
+    const ytdlp = spawn('yt-dlp', [
+      '--no-playlist',
+      ...cookiesArgs,
+      '-f', 'bestaudio',
+      '-o', '-',
+      `https://music.youtube.com/watch?v=${videoId}`,
+    ])
+    const ffmpeg = spawn('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', 'pipe:0',
+      '-ac', '2',
+      '-ar', '48000',
+      '-f', 's16le',
+      'pipe:1',
+    ])
+    ytdlp.stderr.resume()
+    ffmpeg.stderr.resume()
+    ytdlp.stdout.pipe(ffmpeg.stdin)
+    ytdlp.on('error', (err: Error) => ffmpeg.stdin.destroy(err))
+    return ffmpeg.stdout
+  }
+
   async download(videoId: string, options: DownloadOptions = {}): Promise<void> {
     const format = options.format ?? 'opus'
     const codec = format === 'm4a' ? 'mp4a' : 'opus'

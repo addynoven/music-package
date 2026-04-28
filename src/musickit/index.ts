@@ -473,6 +473,12 @@ export class MusicKit {
 
     return this._downloader!.streamAudio(resolved)
   }
+
+  async streamPCM(id: string): Promise<NodeJS.ReadableStream> {
+    await this.ensureClients()
+    const resolved = resolveInput(id)
+    return this._downloader!.streamPCM(resolved)
+  }
 }
 
 // YouTube titles are messy ("Eminem - Rap God (Official Video) [Explicit]").

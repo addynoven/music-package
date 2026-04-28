@@ -278,6 +278,7 @@ declare class MusicKit {
     getCharts(options?: BrowseOptions): Promise<Section[]>;
     download(videoId: string, options?: DownloadOptions$1): Promise<void>;
     streamAudio(id: string): Promise<NodeJS.ReadableStream>;
+    streamPCM(id: string): Promise<NodeJS.ReadableStream>;
 }
 
 interface CacheOptions {
@@ -397,6 +398,8 @@ declare class Downloader {
     private readonly cookiesPath?;
     constructor(resolver: StreamResolver, discovery: DiscoveryClient, cookiesPath?: string | undefined);
     streamAudio(videoId: string): NodeJS.ReadableStream;
+    streamPCMFromUrl(url: string): NodeJS.ReadableStream;
+    streamPCM(videoId: string): NodeJS.ReadableStream;
     download(videoId: string, options?: DownloadOptions): Promise<void>;
     private fetchAndWrite;
     private readWithProgress;

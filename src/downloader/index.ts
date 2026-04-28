@@ -65,6 +65,22 @@ export class Downloader {
   }
 
 
+  streamPCMFromUrl(url: string): NodeJS.ReadableStream {
+    const ffmpeg = spawn('ffmpeg', [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_on_network_error', '1',
+      '-hide_banner', '-loglevel', 'error',
+      '-i', url,
+      '-ac', '2',
+      '-ar', '48000',
+      '-f', 's16le',
+      'pipe:1',
+    ])
+    ffmpeg.stderr.resume()
+    return ffmpeg.stdout
+  }
+
   streamPCM(videoId: string): NodeJS.ReadableStream {
     const cookiesArgs = this.cookiesPath ? ['--cookies', this.cookiesPath] : []
     const ytdlp = spawn('yt-dlp', [

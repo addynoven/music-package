@@ -477,7 +477,14 @@ export class MusicKit {
   async streamPCM(id: string): Promise<NodeJS.ReadableStream> {
     await this.ensureClients()
     const resolved = resolveInput(id)
-    return this._downloader!.streamPCM(resolved)
+    try {
+      // Fast path: use cached/resolved stream URL → ffmpeg directly (~200ms startup).
+      // Falls back to yt-dlp if getStream fails (e.g. cipher error, unsupported format).
+      const streamData = await this.getStream(resolved)
+      return this._downloader!.streamPCMFromUrl(streamData.url)
+    } catch {
+      return this._downloader!.streamPCM(resolved)
+    }
   }
 }
 

@@ -557,13 +557,11 @@ function ytdlpResolve(videoId, quality, cookiesPath) {
       formatSelector,
       `https://music.youtube.com/watch?v=${videoId}`
     ], (err, stdout) => {
-      if (err) {
-        reject(new Error(`yt-dlp failed: ${(err.stderr ?? String(err)).slice(0, 200)}`));
-        return;
-      }
       try {
+        if (!stdout?.trim()) throw new Error("no output");
         const json = JSON.parse(stdout);
         const url = json.url;
+        if (!url) throw new Error("no url in output");
         const acodec = json.acodec ?? "";
         const codec = acodec.includes("opus") ? "opus" : "mp4a";
         const bitrateKbps = json.abr ?? json.tbr ?? 0;
@@ -576,7 +574,9 @@ function ytdlpResolve(videoId, quality, cookiesPath) {
           ...sizeBytes != null && { sizeBytes }
         });
       } catch (parseErr) {
-        reject(new Error(`Failed to parse yt-dlp output: ${parseErr}`));
+        reject(new Error(
+          err ? `yt-dlp failed: ${(err.stderr ?? String(err)).slice(0, 200)}` : `Failed to parse yt-dlp output: ${parseErr}`
+        ));
       }
     });
   });
@@ -659,6 +659,61 @@ var Downloader = class {
     ]);
     proc.stderr.resume();
     return proc.stdout;
+  }
+  streamPCMFromUrl(url) {
+    const ffmpeg = (0, import_node_child_process2.spawn)("ffmpeg", [
+      "-reconnect",
+      "1",
+      "-reconnect_streamed",
+      "1",
+      "-reconnect_on_network_error",
+      "1",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      url,
+      "-ac",
+      "2",
+      "-ar",
+      "48000",
+      "-f",
+      "s16le",
+      "pipe:1"
+    ]);
+    ffmpeg.stderr.resume();
+    return ffmpeg.stdout;
+  }
+  streamPCM(videoId) {
+    const cookiesArgs = this.cookiesPath ? ["--cookies", this.cookiesPath] : [];
+    const ytdlp = (0, import_node_child_process2.spawn)("yt-dlp", [
+      "--no-playlist",
+      ...cookiesArgs,
+      "-f",
+      "bestaudio",
+      "-o",
+      "-",
+      `https://music.youtube.com/watch?v=${videoId}`
+    ]);
+    const ffmpeg = (0, import_node_child_process2.spawn)("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "pipe:0",
+      "-ac",
+      "2",
+      "-ar",
+      "48000",
+      "-f",
+      "s16le",
+      "pipe:1"
+    ]);
+    ytdlp.stderr.resume();
+    ffmpeg.stderr.resume();
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    ytdlp.on("error", (err) => ffmpeg.stdin.destroy(err));
+    return ffmpeg.stdout;
   }
   async download(videoId, options = {}) {
     const format = options.format ?? "opus";
@@ -1754,6 +1809,16 @@ var MusicKit = class _MusicKit {
       return Readable.fromWeb(response.body);
     }
     return this._downloader.streamAudio(resolved);
+  }
+  async streamPCM(id) {
+    await this.ensureClients();
+    const resolved = resolveInput(id);
+    try {
+      const streamData = await this.getStream(resolved);
+      return this._downloader.streamPCMFromUrl(streamData.url);
+    } catch {
+      return this._downloader.streamPCM(resolved);
+    }
   }
 };
 var TITLE_NOISE2 = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi;

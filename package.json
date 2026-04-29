@@ -1,7 +1,7 @@
 {
   "name": "musicstream-sdk",
   "version": "1.0.1",
-  "description": "Unified music SDK for YouTube Music and JioSaavn — search, stream, lyrics, podcasts, download. No API keys required.",
+  "description": "Music SDK for Node.js — search, stream, lyrics, podcasts, download. Powered by YouTube Music. No API keys required.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -27,7 +27,6 @@
   },
   "keywords": [
     "youtube-music",
-    "jiosaavn",
     "music",
     "sdk",
     "streaming",
@@ -57,9 +56,6 @@
     "audio-identification",
     "yt-dlp",
     "spotify",
-    "hindi-music",
-    "indian-music",
-    "bollywood",
     "radio",
     "queue",
     "no-api-key",

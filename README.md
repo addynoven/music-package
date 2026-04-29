@@ -5,7 +5,7 @@
 [![node](https://img.shields.io/node/v/musicstream-sdk)](package.json)
 
 Music search, streaming, lyrics, download, and playback queue for Node.js.  
-One API across **YouTube Music** and **JioSaavn** — no API keys required to get started.
+Powered by YouTube Music — no API keys required to get started.
 
 ```bash
 npm install musicstream-sdk
@@ -19,7 +19,7 @@ npm install musicstream-sdk
 import { MusicKit } from 'musicstream-sdk'
 
 const mk = new MusicKit()
-const songs  = await mk.search('tum hi ho', { filter: 'songs' })
+const songs  = await mk.search('bohemian rhapsody', { filter: 'songs' })
 const stream = await mk.getStream(songs[0].videoId)
 const lyrics = await mk.getLyrics(songs[0].videoId)
 ```
@@ -34,7 +34,7 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 - **Charts** — country-specific top charts
 - **Mood / genre playlists** — browse YouTube Music mood categories
 - **Home feed** — personalized sections ("Trending", "New Releases", "Top Picks", etc.)
-- **Featured playlists** — JioSaavn curated playlists by language
+- **Featured playlists** — curated playlists by language and region
 
 **Streaming**
 - **Playable stream URLs** — pre-signed, cached ~6 hours, auto-refreshed
@@ -43,7 +43,7 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 - **Raw PCM stream** — 48 kHz / 16-bit LE / stereo — drop straight into a Discord voice connection
 
 **URL Resolution**
-- **Paste any URL, it just works** — YouTube (`youtube.com/watch`, `youtu.be`), YouTube Music (`music.youtube.com/watch`, `/browse`, `/playlist`, `/search`), JioSaavn (`jiosaavn.com/song/...`) — all resolve to the right ID automatically
+- **Paste any URL, it just works** — YouTube (`youtube.com/watch`, `youtu.be`), YouTube Music (`music.youtube.com/watch`, `/browse`, `/playlist`, `/search`) — all resolve to the right ID automatically
 - **Spotify resolver** — converts a Spotify track URL to a `"Title Artist"` search query
 
 **Metadata & Lyrics**
@@ -66,7 +66,7 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 - **Podcast / RSS** — parse any RSS feed, full iTunes namespace, direct episode audio URLs
 
 **Infrastructure**
-- **Dual source routing** — JioSaavn for Indian languages (Hindi, Tamil, Telugu, etc.), YouTube Music everywhere else — or configure your own order
+- **Multi-source routing** — automatic best-source selection, configurable order, per-request override
 - **SQLite cache** — built on Node 22's `node:sqlite` (zero native deps), automatic TTL per data type
 - **Rate limiter + retry** — per-endpoint limits, exponential backoff, 429-aware
 - **Event system** — `beforeRequest`, `afterRequest`, `cacheHit`, `cacheMiss`, `rateLimited`, `retry`, `error`
@@ -176,7 +176,7 @@ const playlists = await mk.search('rock classics', { filter: 'playlists' })     
 
 // Limit + source override
 const top5 = await mk.search('shakira', { filter: 'songs', limit: 5 })
-const jio  = await mk.search('tum hi ho', { filter: 'songs', source: 'jiosaavn' })
+const alt  = await mk.search('tum hi ho', { filter: 'songs', source: 'jiosaavn' })  // explicit source
 
 // Spotify URL → search query → results
 import { resolveSpotifyUrl } from 'musicstream-sdk'
@@ -257,17 +257,17 @@ const lrc    = serializeLrc(lines)               // back to .lrc string
 ### Browse
 
 ```ts
-// Home feed — routes to JioSaavn for Indian languages, YouTube Music otherwise
+// Home feed
 const home = await mk.getHome()
-const home = await mk.getHome({ language: 'hindi' })  // → JioSaavn
+const home = await mk.getHome({ language: 'ja' })  // locale-aware
 
 for (const section of home) {
   console.log(section.title)  // "Trending Songs", "New Releases", etc.
   console.log(section.items)  // (Song | Album | Playlist)[]
 }
 
-// Featured playlists (JioSaavn, Indian languages)
-const playlists = await mk.getFeaturedPlaylists({ language: 'tamil' })
+// Featured playlists
+const playlists = await mk.getFeaturedPlaylists({ language: 'fr' })
 
 // Artist / album / playlist pages
 const artist   = await mk.getArtist(channelId)   // songs · albums · singles
@@ -288,10 +288,6 @@ const categories = await mk.getMoodCategories()
 // [{ title: 'Feeling Happy', params: '...' }, ...]
 const sections = await mk.getMoodPlaylists(categories[0].params)
 
-// Language routing check
-import { JIOSAAVN_LANGUAGES } from 'musicstream-sdk'
-JIOSAAVN_LANGUAGES.has('hindi')  // true → JioSaavn
-JIOSAAVN_LANGUAGES.has('ja')     // false → YouTube Music
 ```
 
 ---
@@ -434,7 +430,7 @@ const mk = new MusicKit({
   location: 'IN',
 
   // Source routing
-  sourceOrder: ['jiosaavn', 'youtube'],  // or 'best' (default)
+  sourceOrder: 'best',  // default — or ['jiosaavn', 'youtube'] to customise
 
   // Audio identification
   identify: {
@@ -470,7 +466,7 @@ class MySource {
 }
 
 mk.registerSource(new MySource())
-// Registered sources take priority over built-in JioSaavn + YouTube.
+// Registered sources take priority over built-in sources.
 ```
 
 ---
@@ -540,13 +536,12 @@ resolveInput('https://youtu.be/dQw4w9WgXcQ')                  // "dQw4w9WgXcQ"
 resolveInput('https://music.youtube.com/watch?v=dQw4w9WgXcQ') // "dQw4w9WgXcQ"
 resolveInput('https://music.youtube.com/browse/MPREb_...')     // "MPREb_..."  (album/artist)
 resolveInput('https://music.youtube.com/playlist?list=PL...') // "PL..."      (playlist)
-resolveInput('https://music.youtube.com/search?q=tum+hi+ho')  // "tum hi ho" (search query)
-resolveInput('https://www.jiosaavn.com/song/tum-hi-ho/xyz')   // "jio:xyz"
+resolveInput('https://music.youtube.com/search?q=bohemian+rhapsody')  // "bohemian rhapsody"
 resolveInput('some plain search query')                        // "some plain search query"
 
 // So you can do:
 const id = resolveInput(anyInput)
-const stream = await mk.getStream(id)  // works for URL, video ID, or jio: ID
+const stream = await mk.getStream(id)  // works for any URL or plain video ID
 ```
 
 ```ts
@@ -583,10 +578,9 @@ interface PodcastEpisode { type: 'episode'; guid: string; title: string; descrip
 
 ## Stability
 
-This SDK uses **unofficial APIs** (JioSaavn `api.php`, YouTube InnerTube). Neither has a published SLA.
+This SDK uses **unofficial APIs** (YouTube InnerTube). No published SLA.
 
 - YouTube stream cipher can break when YouTube rotates its player JS — usually fixed in [youtubei.js](https://github.com/LuanRT/YouTube.js) within days. Update the package.
-- JioSaavn endpoints have been stable for years but are undocumented.
 - Use for Discord bots, CLI tools, desktop apps, personal projects. Not for infrastructure where an hour of downtime is unacceptable.
 
 ---

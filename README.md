@@ -547,7 +547,7 @@ import {
   isStreamExpired,     // (stream) → boolean — true within 5min of expiry
   resolveInput,        // (url | id | query) → canonical ID string
   resolveSpotifyUrl,   // (spotifyTrackUrl) → "Title Artist" | null
-  version,             // SDK version string e.g. "2.0.1"
+  version,             // SDK version string e.g. "3.0.0"
 } from 'musicstream-sdk'
 ```
 

@@ -1862,7 +1862,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "1.0.1";
+var version = "3.0.0";
 
 // src/models/index.ts
 var SearchFilter = {

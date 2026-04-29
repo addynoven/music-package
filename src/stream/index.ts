@@ -31,11 +31,13 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
         if (!url) throw new StreamError('no url in output', videoId)
         const acodec: string = json.acodec ?? ''
         const codec: 'opus' | 'mp4a' = acodec.includes('opus') ? 'opus' : 'mp4a'
+        const mimeType = codec === 'opus' ? 'audio/webm; codecs=opus' : 'audio/mp4'
         const bitrateKbps: number = json.abr ?? json.tbr ?? 0
         const sizeBytes: number | undefined = json.filesize ?? json.filesize_approx ?? undefined
         resolve({
           url,
           codec,
+          mimeType,
           bitrate: Math.round(bitrateKbps * 1000),
           expiresAt: parseExpiry(url),
           ...(sizeBytes != null && { sizeBytes }),

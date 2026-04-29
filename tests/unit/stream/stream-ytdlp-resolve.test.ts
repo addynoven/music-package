@@ -133,6 +133,24 @@ describe('StreamResolver — yt-dlp backend', () => {
       expect(result.codec).toBe('mp4a')
     })
 
+    it('sets mimeType "audio/webm; codecs=opus" for opus codec', async () => {
+      const result = await resolveWith({
+        url: 'https://rr5---sn.googlevideo.com/videoplayback?expire=9999999999',
+        acodec: 'opus',
+        abr: 160,
+      })
+      expect(result.mimeType).toBe('audio/webm; codecs=opus')
+    })
+
+    it('sets mimeType "audio/mp4" for mp4a codec', async () => {
+      const result = await resolveWith({
+        url: 'https://rr5---sn.googlevideo.com/videoplayback?expire=9999999999',
+        acodec: 'mp4a.40.2',
+        abr: 128,
+      })
+      expect(result.mimeType).toBe('audio/mp4')
+    })
+
     it('converts abr (kbps) to bitrate in bps', async () => {
       const result = await resolveWith({
         url: 'https://rr5---sn.googlevideo.com/videoplayback?expire=9999999999',

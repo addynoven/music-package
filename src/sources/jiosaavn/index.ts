@@ -187,7 +187,7 @@ export class JioSaavnSource implements AudioSource {
     const { suffix, bitrate } = BITRATE[quality]
     const url = decrypted.replace('_96', suffix)
 
-    return { url, codec: 'mp4a', bitrate, expiresAt: extractExpiry(url) }
+    return { url, codec: 'mp4a', mimeType: 'audio/mp4', bitrate, expiresAt: extractExpiry(url) }
   }
 
   async getMetadata(id: string): Promise<Song> {

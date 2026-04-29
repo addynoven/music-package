@@ -68,6 +68,7 @@ export interface Lyrics {
 export interface StreamingData {
   url: string
   codec: 'opus' | 'mp4a'
+  mimeType: string
   bitrate: number
   expiresAt: number
   loudnessDb?: number

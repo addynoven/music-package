@@ -24,7 +24,7 @@ export { MusicKitErrorCode } from './models'
 export { getBestThumbnail } from './utils/thumbnails'
 export { isStreamExpired } from './utils/stream-utils'
 export { JIOSAAVN_LANGUAGES } from './sources/jiosaavn'
-export { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp } from './lyrics/lrc-utils'
+export { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp, offsetLrc, serializeLrc } from './lyrics/lrc-utils'
 export {
   ThumbnailSchema,
   SongSchema,

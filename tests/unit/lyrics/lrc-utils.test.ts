@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp } from '../../../src/lyrics/lrc-utils'
+import { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp, offsetLrc, serializeLrc } from '../../../src/lyrics/lrc-utils'
 
 const SAMPLE_LRC = `[00:17.73] Never gonna give you up
 [00:20.15] Never gonna let you down
@@ -132,5 +132,73 @@ describe('formatTimestamp', () => {
 
   it('handles large values (over an hour)', () => {
     expect(formatTimestamp(3661.9)).toBe('[61:01.90]')
+  })
+})
+
+// ── offsetLrc ─────────────────────────────────────────────────────────────────
+
+describe('offsetLrc', () => {
+  it('shifts all timestamps forward by the given milliseconds', () => {
+    const lines = [{ time: 10, text: 'A' }, { time: 20, text: 'B' }]
+    const result = offsetLrc(lines, 500)
+    expect(result[0].time).toBeCloseTo(10.5)
+    expect(result[1].time).toBeCloseTo(20.5)
+  })
+
+  it('shifts all timestamps backward with a negative offset', () => {
+    const lines = [{ time: 10, text: 'A' }, { time: 20, text: 'B' }]
+    const result = offsetLrc(lines, -1000)
+    expect(result[0].time).toBeCloseTo(9)
+    expect(result[1].time).toBeCloseTo(19)
+  })
+
+  it('clamps to zero — timestamps never go negative', () => {
+    const lines = [{ time: 0.5, text: 'A' }]
+    const result = offsetLrc(lines, -2000)
+    expect(result[0].time).toBe(0)
+  })
+
+  it('does not mutate the original array', () => {
+    const lines = [{ time: 10, text: 'A' }]
+    offsetLrc(lines, 500)
+    expect(lines[0].time).toBe(10)
+  })
+
+  it('returns empty array for empty input', () => {
+    expect(offsetLrc([], 1000)).toEqual([])
+  })
+
+  it('preserves text content unchanged', () => {
+    const lines = [{ time: 5, text: 'Hello' }]
+    expect(offsetLrc(lines, 200)[0].text).toBe('Hello')
+  })
+})
+
+// ── serializeLrc ──────────────────────────────────────────────────────────────
+
+describe('serializeLrc', () => {
+  it('produces valid LRC lines that parseLrc can round-trip', () => {
+    const lines = [
+      { time: 17.73, text: 'Never gonna give you up' },
+      { time: 20.15, text: 'Never gonna let you down' },
+    ]
+    const lrc = serializeLrc(lines)
+    const reparsed = parseLrc(lrc)
+    expect(reparsed).toHaveLength(2)
+    expect(reparsed[0].text).toBe('Never gonna give you up')
+    expect(reparsed[1].text).toBe('Never gonna let you down')
+    expect(reparsed[0].time).toBeCloseTo(17.73, 1)
+    expect(reparsed[1].time).toBeCloseTo(20.15, 1)
+  })
+
+  it('returns empty string for empty input', () => {
+    expect(serializeLrc([])).toBe('')
+  })
+
+  it('each line is prefixed with a formatted timestamp', () => {
+    const lines = [{ time: 60, text: 'One minute' }]
+    const lrc = serializeLrc(lines)
+    expect(lrc).toContain('[01:00.00]')
+    expect(lrc).toContain('One minute')
   })
 })

@@ -35,3 +35,15 @@ export function formatTimestamp(seconds: number): string {
   const ss = secs.toFixed(2).padStart(5, '0')
   return `[${mm}:${ss}]`
 }
+
+export function offsetLrc(lines: LyricLine[], offsetMs: number): LyricLine[] {
+  return lines.map(line => ({
+    ...line,
+    time: Math.max(0, line.time + offsetMs / 1000),
+  }))
+}
+
+export function serializeLrc(lines: LyricLine[]): string {
+  if (lines.length === 0) return ''
+  return lines.map(line => `${formatTimestamp(line.time)} ${line.text}`).join('\n')
+}

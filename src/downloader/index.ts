@@ -4,14 +4,14 @@ import { spawn } from 'node:child_process'
 import { StreamResolver } from '../stream'
 import { NetworkError } from '../errors'
 import type { DiscoveryClient } from '../discovery'
-import type { Song } from '../models'
+import type { Song, DownloadProgress } from '../models'
 
 type DownloadFormat = 'opus' | 'm4a'
 
 interface DownloadOptions {
   path?: string
   format?: DownloadFormat
-  onProgress?: (percent: number) => void
+  onProgress?: (progress: DownloadProgress) => void
   _mockSong?: Song
   _mockReadStream?: NodeJS.ReadableStream
 }
@@ -122,7 +122,7 @@ export class Downloader {
 
     if (options._mockReadStream) {
       const writeStream = createWriteStream(dest)
-      return this.readWithProgress(options._mockReadStream, writeStream as any, stream.sizeBytes, options.onProgress)
+      return this.readWithProgress(options._mockReadStream, writeStream as any, filename, stream.sizeBytes, options.onProgress)
     }
 
     const { mkdir } = await import('node:fs/promises')
@@ -131,7 +131,7 @@ export class Downloader {
     const writeStream = createWriteStream(dest)
 
     try {
-      await this.fetchAndWrite(stream.url, writeStream, stream.sizeBytes, options.onProgress)
+      await this.fetchAndWrite(stream.url, writeStream, filename, stream.sizeBytes, options.onProgress)
     } catch (err: any) {
       writeStream.destroy()
       // If the direct URL fails (e.g. 403 / PO token), fall back to yt-dlp
@@ -148,8 +148,9 @@ export class Downloader {
   private async fetchAndWrite(
     url: string,
     writeStream: ReturnType<typeof createWriteStream>,
+    filename: string,
     totalBytes?: number,
-    onProgress?: (percent: number) => void,
+    onProgress?: (progress: DownloadProgress) => void,
   ): Promise<void> {
     const response = await fetch(url, {
       headers: {
@@ -174,8 +175,13 @@ export class Downloader {
       readable.on('data', (chunk: Buffer) => {
         writeStream.write(chunk)
         downloaded += chunk.length
-        if (onProgress && totalBytes) {
-          onProgress(Math.round((downloaded / totalBytes) * 100))
+        if (onProgress) {
+          onProgress({
+            percent: totalBytes ? Math.min(100, Math.round((downloaded / totalBytes) * 100)) : 0,
+            bytesDownloaded: downloaded,
+            totalBytes,
+            filename,
+          })
         }
       })
       readable.on('error', (err) => { writeStream.destroy(); reject(err) })
@@ -189,16 +195,22 @@ export class Downloader {
   private readWithProgress(
     readable: NodeJS.ReadableStream,
     writeStream: { on: (e: string, cb: Function) => void },
+    filename: string,
     totalBytes?: number,
-    onProgress?: (percent: number) => void,
+    onProgress?: (progress: DownloadProgress) => void,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let downloaded = 0
 
       readable.on('data', (chunk: Buffer) => {
         downloaded += chunk.length
-        if (onProgress && totalBytes) {
-          onProgress(Math.round((downloaded / totalBytes) * 100))
+        if (onProgress) {
+          onProgress({
+            percent: totalBytes ? Math.min(100, Math.round((downloaded / totalBytes) * 100)) : 0,
+            bytesDownloaded: downloaded,
+            totalBytes,
+            filename,
+          })
         }
       })
 

@@ -134,15 +134,15 @@ describe('Downloader', () => {
   // ─── progress callback ────────────────────────────────────────────────────
 
   describe('onProgress callback', () => {
-    it('calls onProgress with values between 0 and 100', async () => {
+    it('receives a DownloadProgress object, not a bare number', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ sizeBytes: 1000 }))
 
-      const progressValues: number[] = []
+      const received: any[] = []
       const mockStream = {
         on: vi.fn((event: string, cb: Function) => {
           if (event === 'data') {
-            cb(Buffer.alloc(500)) // simulate 50% chunk
-            cb(Buffer.alloc(500)) // simulate 100% chunk
+            cb(Buffer.alloc(500))
+            cb(Buffer.alloc(500))
           }
           if (event === 'end') cb()
         }),
@@ -152,11 +152,96 @@ describe('Downloader', () => {
 
       await downloader.download('dQw4w9WgXcQ', {
         path: tmpDir,
-        onProgress: (p) => progressValues.push(p),
+        onProgress: (p) => received.push(p),
         _mockReadStream: mockStream,
+        _mockSong: makeSong({ title: 'Test Song', artist: 'Test Artist' }),
       })
 
-      expect(progressValues.some(p => p > 0 && p <= 100)).toBe(true)
+      expect(received.length).toBeGreaterThan(0)
+      const first = received[0]
+      expect(typeof first).toBe('object')
+      expect(typeof first.percent).toBe('number')
+      expect(typeof first.bytesDownloaded).toBe('number')
+      expect(typeof first.filename).toBe('string')
+    })
+
+    it('percent is between 0 and 100', async () => {
+      ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ sizeBytes: 1000 }))
+
+      const percents: number[] = []
+      const mockStream = {
+        on: vi.fn((event: string, cb: Function) => {
+          if (event === 'data') {
+            cb(Buffer.alloc(300))
+            cb(Buffer.alloc(700))
+          }
+          if (event === 'end') cb()
+        }),
+        pipe: vi.fn().mockReturnThis(),
+      }
+      ;(createWriteStream as any).mockReturnValue({ on: vi.fn() })
+
+      await downloader.download('dQw4w9WgXcQ', {
+        path: tmpDir,
+        onProgress: (p) => percents.push(p.percent),
+        _mockReadStream: mockStream,
+        _mockSong: makeSong({ title: 'Test Song', artist: 'Test Artist' }),
+      })
+
+      expect(percents.every(p => p >= 0 && p <= 100)).toBe(true)
+      expect(percents[percents.length - 1]).toBe(100)
+    })
+
+    it('filename in progress matches the download filename', async () => {
+      ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ sizeBytes: 100 }))
+
+      const filenames: string[] = []
+      const mockStream = {
+        on: vi.fn((event: string, cb: Function) => {
+          if (event === 'data') cb(Buffer.alloc(100))
+          if (event === 'end') cb()
+        }),
+        pipe: vi.fn().mockReturnThis(),
+      }
+      ;(createWriteStream as any).mockReturnValue({ on: vi.fn() })
+
+      const song = makeSong({ title: 'Bohemian Rhapsody', artist: 'Queen' })
+      await downloader.download(song.videoId, {
+        path: tmpDir,
+        format: 'opus',
+        onProgress: (p) => filenames.push(p.filename),
+        _mockReadStream: mockStream,
+        _mockSong: song,
+      })
+
+      expect(filenames[0]).toBe('Bohemian Rhapsody (Queen).opus')
+    })
+
+    it('bytesDownloaded accumulates correctly across chunks', async () => {
+      ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ sizeBytes: 1000 }))
+
+      const snapshots: number[] = []
+      const mockStream = {
+        on: vi.fn((event: string, cb: Function) => {
+          if (event === 'data') {
+            cb(Buffer.alloc(200))
+            cb(Buffer.alloc(300))
+            cb(Buffer.alloc(500))
+          }
+          if (event === 'end') cb()
+        }),
+        pipe: vi.fn().mockReturnThis(),
+      }
+      ;(createWriteStream as any).mockReturnValue({ on: vi.fn() })
+
+      await downloader.download('dQw4w9WgXcQ', {
+        path: tmpDir,
+        onProgress: (p) => snapshots.push(p.bytesDownloaded),
+        _mockReadStream: mockStream,
+        _mockSong: makeSong({ title: 'Test Song', artist: 'Test Artist' }),
+      })
+
+      expect(snapshots).toEqual([200, 500, 1000])
     })
   })
 

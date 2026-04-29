@@ -15,6 +15,7 @@ export { DiscoveryClient } from './discovery'
 export { StreamResolver } from './stream'
 export { Downloader } from './downloader'
 export { MusicKitEmitter } from './events'
+export { Logger } from './logger'
 
 // Value exports (usable at runtime)
 export { version } from '../package.json'
@@ -48,6 +49,7 @@ export type {
   Quality,
   DownloadFormat,
   DownloadOptions,
+  DownloadProgress,
   BrowseOptions,
   LogLevel,
   RateLimitConfig,

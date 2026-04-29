@@ -105,10 +105,17 @@ export interface StreamOptions {
   quality?: Quality
 }
 
+export interface DownloadProgress {
+  percent: number
+  bytesDownloaded: number
+  totalBytes?: number
+  filename: string
+}
+
 export interface DownloadOptions {
   path?: string
   format?: DownloadFormat
-  onProgress?: (percent: number) => void
+  onProgress?: (progress: DownloadProgress) => void
 }
 
 export interface BrowseOptions {
@@ -140,7 +147,7 @@ export type SourcePreference = 'best' | SourceName[]
 
 export interface MusicKitConfig {
   logLevel?: LogLevel
-  logHandler?: (level: LogLevel, message: string) => void
+  logHandler?: (level: LogLevel, message: string, meta?: Record<string, unknown>) => void
   rateLimit?: RateLimitConfig
   minRequestGap?: number
   cache?: CacheConfig

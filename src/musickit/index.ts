@@ -16,6 +16,7 @@ import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
 import { rankSongs } from '../discovery/ranker'
 import { ValidationError, NotFoundError, NetworkError } from '../errors'
+import { Logger } from '../logger'
 import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
@@ -55,6 +56,7 @@ export class MusicKit {
   private readonly retry: RetryEngine
   private readonly session: SessionManager
   private readonly emitter: MusicKitEmitter
+  private readonly log: Logger
   private readonly searchCache = new Map<string, SearchResults | Song[] | Album[] | Artist[]>()
   private readonly sourceOrder: SourceName[]
   readonly sources: AudioSource[] = []
@@ -74,6 +76,7 @@ export class MusicKit {
     })
     this.limiter = new RateLimiter(config.rateLimit ?? {}, config.minRequestGap ?? 100)
     this.emitter = new MusicKitEmitter()
+    this.log = new Logger({ logLevel: config.logLevel, logHandler: config.logHandler })
     this.retry = new RetryEngine({
       maxAttempts: config.maxRetries ?? 3,
       backoffBase: config.backoffBase ?? 1_000,
@@ -92,8 +95,7 @@ export class MusicKit {
     }
 
     if (!config.youtubeApiKey && !config.cookiesPath) {
-      const log = config.logHandler ?? ((_, msg) => console.warn(msg))
-      log('warn', '[MusicKit] WARNING: No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.')
+      this.log.warn('[MusicKit] No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.')
     }
   }
 

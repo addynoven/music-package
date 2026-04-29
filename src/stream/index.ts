@@ -41,7 +41,8 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
           bitrate: Math.round(bitrateKbps * 1000),
           expiresAt: parseExpiry(url),
           ...(sizeBytes != null && { sizeBytes }),
-        })
+          _meta: { title: json.title ?? '', artist: json.artist ?? json.uploader ?? '' },
+        } as any)
       } catch (parseErr) {
         reject(new Error(err
           ? `yt-dlp failed: ${((err as any).stderr ?? String(err)).slice(0, 200)}`

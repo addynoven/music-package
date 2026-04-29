@@ -128,14 +128,22 @@ export class Downloader {
     const format = options.format ?? 'opus'
     const codec = format === 'm4a' ? 'mp4a' : 'opus'
 
-    const [stream, song] = await Promise.all([
-      this.resolver.resolve(videoId, { codec } as any),
-      options._mockSong
-        ? Promise.resolve(options._mockSong)
-        : this.discovery.getInfo(videoId),
-    ])
+    const stream = await this.resolver.resolve(videoId, { codec } as any)
+    const meta = (stream as any)._meta as { title: string; artist: string } | undefined
 
-    const filename = `${sanitize(song.title)} (${sanitize(song.artist)}).${format}`
+    let title = meta?.title || ''
+    let artist = meta?.artist || ''
+
+    if ((!title || !artist) && !options._mockSong) {
+      const song = await this.discovery.getInfo(videoId)
+      title = title || song.title
+      artist = artist || song.artist
+    } else if (options._mockSong) {
+      title = options._mockSong.title
+      artist = options._mockSong.artist
+    }
+
+    const filename = `${sanitize(title || videoId)} (${sanitize(artist)}).${format}`
     const dest = join(options.path ?? '.', filename)
 
     if (options._mockReadStream) {
@@ -146,21 +154,7 @@ export class Downloader {
     const { mkdir } = await import('node:fs/promises')
     await mkdir(options.path ?? '.', { recursive: true })
 
-    const writeStream = createWriteStream(dest)
-
-    try {
-      await this.fetchAndWrite(stream.url, writeStream, filename, stream.sizeBytes, options.onProgress)
-    } catch (err: any) {
-      writeStream.destroy()
-      // If the direct URL fails (e.g. 403 / PO token), fall back to yt-dlp
-      if (err.message?.includes('403') || err.message?.includes('audio fetch failed')) {
-        const { unlink } = await import('node:fs/promises')
-        await unlink(dest).catch(() => {})
-        await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress)
-      } else {
-        throw err
-      }
-    }
+    await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress)
   }
 
   private async fetchAndWrite(

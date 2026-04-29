@@ -1,28 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { existsSync, unlinkSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { Downloader } from '../../../src/downloader'
 import { makeStreamingData, makeSong } from '../../helpers/mock-factory'
 
-// Mock the StreamResolver so we never hit real YouTube
 vi.mock('../../../src/stream', () => ({
   StreamResolver: vi.fn().mockImplementation(() => ({
     resolve: vi.fn(),
   })),
 }))
 
-// Mock node:fs for file write operations
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(),
+}))
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
-  return {
-    ...actual,
-    createWriteStream: vi.fn(),
-  }
+  return { ...actual, createWriteStream: vi.fn() }
 })
 
 import { StreamResolver } from '../../../src/stream'
+import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
+
+function makeYtdlpMock(exitCode = 0) {
+  const proc = new EventEmitter() as any
+  proc.stdout = new EventEmitter()
+  const stderr = new EventEmitter() as any
+  stderr.resume = vi.fn()
+  proc.stderr = stderr
+  process.nextTick(() => proc.emit('close', exitCode))
+  return proc
+}
 
 describe('Downloader', () => {
   let resolver: InstanceType<typeof StreamResolver>
@@ -34,18 +43,9 @@ describe('Downloader', () => {
     resolver = new (StreamResolver as any)()
     const mockDiscovery = { getInfo: vi.fn().mockResolvedValue({ title: 'Test Song', artist: 'Test Artist', videoId: 'dQw4w9WgXcQ', type: 'song', duration: 0, thumbnails: [] }) }
     downloader = new Downloader(resolver as any, mockDiscovery as any)
-    // Stub fetch so fetchAndWrite completes without hitting real network
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: new ReadableStream({ start(c) { c.close() } }),
-    }))
-    // Default write stream: fires 'finish' immediately so fetchAndWrite resolves
+
     const makeWriteStream = () => ({
-      write: vi.fn(),
-      end: vi.fn(),
-      destroy: vi.fn(),
-      on: vi.fn(),
+      write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(),
       once: vi.fn((event: string, cb: Function) => { if (event === 'finish') cb() }),
     })
     ;(createWriteStream as any).mockReturnValue(makeWriteStream())
@@ -59,71 +59,56 @@ describe('Downloader', () => {
 
   describe('file naming', () => {
     it('names the file "<title> (<artist>).<format>"', async () => {
-      const stream = makeStreamingData()
+      const stream = makeStreamingData({ _meta: { title: 'Bohemian Rhapsody', artist: 'Queen' } } as any)
       const song = makeSong({ title: 'Bohemian Rhapsody', artist: 'Queen' })
       ;(resolver.resolve as any).mockResolvedValue(stream)
-
-      const writtenPaths: string[] = []
-      ;(createWriteStream as any).mockImplementation((p: string) => {
-        writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
-      })
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock() as any)
 
       await downloader.download(song.videoId, { path: tmpDir, format: 'opus', _mockSong: song })
 
-      expect(writtenPaths[0]).toContain('Bohemian Rhapsody (Queen).opus')
+      const outputArg = vi.mocked(spawn).mock.calls[0][1].find((a: string, i: number, arr: string[]) => arr[i - 1] === '-o')
+      expect(outputArg).toContain('Bohemian Rhapsody (Queen).opus')
     })
 
     it('strips characters invalid in file names from the title', async () => {
-      const stream = makeStreamingData()
       const song = makeSong({ title: 'Song: A/B Test', artist: 'Test' })
-      ;(resolver.resolve as any).mockResolvedValue(stream)
-
-      const writtenPaths: string[] = []
-      ;(createWriteStream as any).mockImplementation((p: string) => {
-        writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
-      })
+      ;(resolver.resolve as any).mockResolvedValue(makeStreamingData())
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock() as any)
 
       await downloader.download(song.videoId, { path: tmpDir, _mockSong: song })
 
-      // Colons and slashes must be stripped or replaced from the filename (not the directory prefix)
       const { basename } = await import('node:path')
-      expect(basename(writtenPaths[0])).not.toMatch(/[:/\\]/)
+      const outputArg = vi.mocked(spawn).mock.calls[0][1].find((a: string, i: number, arr: string[]) => arr[i - 1] === '-o') ?? ''
+      expect(basename(outputArg)).not.toMatch(/[:/\\]/)
     })
 
     it('defaults to opus format when no format is specified', async () => {
-      const stream = makeStreamingData()
       const song = makeSong()
-      ;(resolver.resolve as any).mockResolvedValue(stream)
-
-      const writtenPaths: string[] = []
-      ;(createWriteStream as any).mockImplementation((p: string) => {
-        writtenPaths.push(p)
-        return { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) }
-      })
+      ;(resolver.resolve as any).mockResolvedValue(makeStreamingData())
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock() as any)
 
       await downloader.download(song.videoId, { path: tmpDir, _mockSong: song })
 
-      expect(writtenPaths[0]).toMatch(/\.opus$/)
+      const outputArg = vi.mocked(spawn).mock.calls[0][1].find((a: string, i: number, arr: string[]) => arr[i - 1] === '-o') ?? ''
+      expect(outputArg).toMatch(/\.opus$/)
     })
   })
 
   // ─── format selection ─────────────────────────────────────────────────────
 
   describe('format selection', () => {
-    it('requests opus quality from the stream resolver for opus format', async () => {
+    it('requests opus codec from the stream resolver for opus format', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData())
-      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock() as any)
 
       await downloader.download('dQw4w9WgXcQ', { path: tmpDir, format: 'opus' })
 
       expect(resolver.resolve).toHaveBeenCalledWith('dQw4w9WgXcQ', expect.objectContaining({ codec: 'opus' }))
     })
 
-    it('requests m4a quality from the stream resolver for m4a format', async () => {
+    it('requests m4a codec from the stream resolver for m4a format', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData({ codec: 'mp4a' }))
-      ;(createWriteStream as any).mockReturnValue({ write: vi.fn(), end: vi.fn(), destroy: vi.fn(), on: vi.fn(), once: vi.fn((e: string, cb: Function) => { if (e === 'finish') cb() }) })
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock() as any)
 
       await downloader.download('dQw4w9WgXcQ', { path: tmpDir, format: 'm4a' })
 
@@ -140,10 +125,7 @@ describe('Downloader', () => {
       const received: any[] = []
       const mockStream = {
         on: vi.fn((event: string, cb: Function) => {
-          if (event === 'data') {
-            cb(Buffer.alloc(500))
-            cb(Buffer.alloc(500))
-          }
+          if (event === 'data') { cb(Buffer.alloc(500)); cb(Buffer.alloc(500)) }
           if (event === 'end') cb()
         }),
         pipe: vi.fn().mockReturnThis(),
@@ -171,10 +153,7 @@ describe('Downloader', () => {
       const percents: number[] = []
       const mockStream = {
         on: vi.fn((event: string, cb: Function) => {
-          if (event === 'data') {
-            cb(Buffer.alloc(300))
-            cb(Buffer.alloc(700))
-          }
+          if (event === 'data') { cb(Buffer.alloc(300)); cb(Buffer.alloc(700)) }
           if (event === 'end') cb()
         }),
         pipe: vi.fn().mockReturnThis(),
@@ -223,11 +202,7 @@ describe('Downloader', () => {
       const snapshots: number[] = []
       const mockStream = {
         on: vi.fn((event: string, cb: Function) => {
-          if (event === 'data') {
-            cb(Buffer.alloc(200))
-            cb(Buffer.alloc(300))
-            cb(Buffer.alloc(500))
-          }
+          if (event === 'data') { cb(Buffer.alloc(200)); cb(Buffer.alloc(300)); cb(Buffer.alloc(500)) }
           if (event === 'end') cb()
         }),
         pipe: vi.fn().mockReturnThis(),
@@ -256,15 +231,13 @@ describe('Downloader', () => {
       ).rejects.toThrow('Video unavailable')
     })
 
-    it('throws DownloadError when file write fails', async () => {
+    it('throws when yt-dlp exits with non-zero code', async () => {
       ;(resolver.resolve as any).mockResolvedValue(makeStreamingData())
-      ;(createWriteStream as any).mockImplementation(() => {
-        throw new Error('ENOENT: no such file or directory')
-      })
+      vi.mocked(spawn).mockImplementation(() => makeYtdlpMock(1) as any)
 
       await expect(
-        downloader.download('dQw4w9WgXcQ', { path: '/nonexistent/path' })
-      ).rejects.toThrow()
+        downloader.download('dQw4w9WgXcQ', { path: tmpDir })
+      ).rejects.toThrow('yt-dlp download failed')
     })
   })
 })

@@ -1,6 +1,6 @@
 # musicstream-sdk
 
-Node.js SDK for music search, streaming, browse, lyrics, and download.
+Node.js SDK for music search, streaming, browse, lyrics, download, and playback queue.
 Unified API across JioSaavn and YouTube Music.
 
 ```bash
@@ -49,8 +49,10 @@ console.log(stream.url)    // https://...
 console.log(stream.codec)  // "opus" or "mp4a"
 console.log(stream.bitrate) // 320000 (bps)
 
-// Lyrics
+// Lyrics (synced + plain)
 const lyrics = await mk.getLyrics(songs[0].videoId)
+console.log(lyrics?.plain)
+console.log(lyrics?.synced)   // LyricLine[] | null
 
 // What to play next
 const upNext = await mk.getSuggestions(songs[0].videoId)
@@ -84,6 +86,14 @@ await mk.getStream('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc')
 await mk.getStream('https://www.youtube.com/watch?v=fJ9rUzIMcZQ')
 await mk.getStream('https://music.youtube.com/watch?v=fJ9rUzIMcZQ')
 await mk.search('https://music.youtube.com/search?q=queen')
+
+// Spotify track URLs — resolved via HTML scrape to a search query
+import { resolveSpotifyUrl } from 'musicstream-sdk'
+const query = await resolveSpotifyUrl('https://open.spotify.com/track/...')
+// → "Song Title Artist Name"
+if (query) {
+  const songs = await mk.search(query, { filter: 'songs' })
+}
 ```
 
 ---
@@ -101,9 +111,9 @@ const all = await mk.search('queen')
 // all.songs[] · all.albums[] · all.artists[] · all.playlists[]
 
 // Filtered (TypeScript infers the exact return type)
-const songs    = await mk.search('bohemian rhapsody', { filter: 'songs' })
-const albums   = await mk.search('a night at the opera', { filter: 'albums' })
-const artists  = await mk.search('queen', { filter: 'artists' })
+const songs     = await mk.search('bohemian rhapsody', { filter: 'songs' })
+const albums    = await mk.search('a night at the opera', { filter: 'albums' })
+const artists   = await mk.search('queen', { filter: 'artists' })
 const playlists = await mk.search('rock classics', { filter: 'playlists' })
 
 // Limit results
@@ -141,6 +151,16 @@ if (isStreamExpired(cachedStream)) {
 // Metadata + stream in one call
 const track = await mk.getTrack(songId)
 // track inherits all Song fields plus track.stream: StreamingData
+
+// Raw audio stream (yt-dlp stdout piped directly — no ffmpeg)
+const readable = await mk.streamAudio(videoId)
+readable.pipe(someWritable)
+
+// Raw PCM stream — 48 kHz, 16-bit, stereo, little-endian
+// Fast path: resolves the stream URL and feeds it to ffmpeg directly (~200ms).
+// Falls back to yt-dlp | ffmpeg if URL resolution fails.
+const pcm = await mk.streamPCM(videoId)
+pcm.pipe(discordVoiceConnection)   // works directly with discord.js
 ```
 
 ---
@@ -162,11 +182,43 @@ console.log(thumb?.url)
 
 ### Lyrics
 
+Returns `{ plain, synced }` — never just a string. `synced` is `null` when the source
+only has plain text.
+
 ```ts
-const lyrics = await mk.getLyrics(songId)  // string | null
-// null for YouTube IDs — lyrics API is JioSaavn only.
-// Works with platform URLs too:
-await mk.getLyrics('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc')
+const lyrics = await mk.getLyrics(songId)  // Lyrics | null
+
+if (lyrics) {
+  console.log(lyrics.plain)   // full plain text
+
+  if (lyrics.synced) {
+    // LyricLine[] — sorted by time (seconds)
+    for (const line of lyrics.synced) {
+      console.log(line.time, line.text)
+      // line.words — LyricWord[] with per-word timestamps (enhanced LRC only)
+    }
+  }
+}
+```
+
+**LRC utilities** — parse, manipulate, and render synced lyrics:
+
+```ts
+import {
+  parseLrc,
+  getActiveLine,
+  getActiveLineIndex,
+  formatTimestamp,
+  offsetLrc,
+  serializeLrc,
+} from 'musicstream-sdk'
+
+const lines = parseLrc(rawLrcString)          // LyricLine[]
+const active = getActiveLine(lines, 42.5)     // LyricLine at t=42.5s
+const idx = getActiveLineIndex(lines, 42.5)   // number index
+const ts = formatTimestamp(42.5)              // "[00:42.50]"
+const shifted = offsetLrc(lines, 1.0)         // shift all lines by +1s
+const lrcText = serializeLrc(lines)           // back to .lrc string
 ```
 
 ---
@@ -236,8 +288,6 @@ const related = await mk.getRelated(youtubeVideoId)
 // Charts
 const global = await mk.getCharts()
 const us     = await mk.getCharts({ country: 'US' })
-// Note: country option is currently a no-op — youtubei.js getExplore()
-// does not support country filtering.
 ```
 
 ---
@@ -248,11 +298,108 @@ const us     = await mk.getCharts({ country: 'US' })
 // Requires yt-dlp on PATH
 await mk.download(youtubeVideoId, {
   path: './downloads',
-  format: 'opus',             // 'opus' | 'mp3' | 'm4a' (default: 'opus')
-  quality: 'high',
-  onProgress: (pct) => process.stdout.write(`\r${pct.toFixed(0)}%`),
+  format: 'opus',     // 'opus' | 'm4a' (default: 'opus')
+  onProgress: (p) => process.stdout.write(`\r${p.percent.toFixed(0)}%`),
 })
 // File saved as: <title> (<artist>).opus
+```
+
+---
+
+### Queue
+
+A pure, in-memory playback queue. No network calls — bring your own `Song` objects.
+
+```ts
+import { Queue } from 'musicstream-sdk'
+import type { RepeatMode } from 'musicstream-sdk'
+
+const queue = new Queue<Song>()
+
+// Add tracks
+queue.add(song1)
+queue.add(song2)
+queue.playNext(urgentSong)   // inserts at front of upcoming list
+
+// Playback
+const current = queue.next()      // advances and returns next Song | null
+const prev    = queue.previous()  // goes back one in history
+
+// Inspect
+queue.current             // currently playing Song | null
+queue.upcoming            // Song[] not yet played
+queue.history             // Song[] already played
+queue.size                // total tracks remaining
+queue.isEmpty             // boolean
+
+// Repeat
+queue.repeat = 'off'      // default — play through and stop
+queue.repeat = 'one'      // repeat current track forever
+queue.repeat = 'all'      // loop the whole queue
+
+// Shuffle (Fisher-Yates in-place, preserves current + history)
+queue.shuffle()
+
+// Reorder
+queue.move(2, 0)          // move index 2 to index 0 (front of upcoming)
+queue.skipTo(3)           // discard everything before index 3
+
+// Remove / clear
+queue.remove(1)           // remove upcoming[1]
+queue.clear()             // wipe everything including current and history
+```
+
+---
+
+### Podcast
+
+Fetch and parse any podcast RSS feed. No API key or account required.
+
+```ts
+// Via MusicKit
+const podcast = await mk.getPodcast('https://feeds.simplecast.com/...')
+
+// Or directly
+import { PodcastClient } from 'musicstream-sdk'
+const client = new PodcastClient()
+const podcast = await client.getFeed('https://...')
+
+podcast.title        // "My Podcast"
+podcast.author       // "John Doe"
+podcast.thumbnails   // Thumbnail[]
+podcast.episodes     // PodcastEpisode[]
+
+const ep = podcast.episodes[0]
+ep.title             // "Episode 42"
+ep.url               // direct audio URL — feed to getStream or play directly
+ep.duration          // seconds
+ep.publishedAt       // ISO 8601 string
+ep.season            // number | undefined
+ep.episode           // number | undefined
+ep.explicit          // boolean
+ep.thumbnails        // episode-level art, falls back to feed art
+```
+
+---
+
+### Audio Identification
+
+Identify a song from an audio file using [AcoustID](https://acoustid.org) fingerprinting
+and optionally [SongRec](https://github.com/marin-m/SongRec) (Shazam-backed).
+Requires a free AcoustID API key and `fpcalc` on your PATH.
+
+```ts
+const mk = new MusicKit({
+  identify: {
+    acoustidApiKey: process.env.ACOUSTID_KEY,
+    songrecBin: '/usr/bin/songrec',   // optional — adds Shazam recognition
+  },
+})
+
+const song = await mk.identify('./unknown-track.mp3')
+// → Song | null
+// SongRec is tried first (faster), then AcoustID fingerprint + lookup.
+// On match, searches YouTube Music to return a full Song with videoId.
 ```
 
 ---
@@ -315,11 +462,15 @@ const mk = new MusicKit({
   visitorId: 'CgtBQnlV...',  // bring your own
   userAgent: 'Mozilla/5.0 ...',
 
-  // YouTube Music locale (sets hl/gl on the Innertube session)
-  language: 'hi',             // BCP-47 language code — affects YT Music search/home language
-  location: 'IN',             // ISO 3166-1 alpha-2 country code — affects YT Music charts/charts
-  // Note: JioSaavn language is passed per-call (getHome/getFeaturedPlaylists options),
-  // not here. Use language/location for YouTube Music locale only.
+  // YouTube Music locale
+  language: 'hi',             // BCP-47 language code
+  location: 'IN',             // ISO 3166-1 alpha-2 country code
+
+  // Audio identification
+  identify: {
+    acoustidApiKey: process.env.ACOUSTID_KEY,
+    songrecBin: '/usr/bin/songrec',
+  },
 })
 ```
 
@@ -349,7 +500,6 @@ class MySource implements AudioSource {
   async getPlaylist?(id: string): Promise<Playlist> { /* ... */ }
   async getRadio?(id: string): Promise<Song[]> { /* ... */ }
   async getHome?(language?: string): Promise<Section[]> { /* ... */ }
-  async getLyrics?(id: string): Promise<string | null> { /* ... */ }
 }
 
 const mk = new MusicKit()
@@ -363,10 +513,33 @@ mk.registerSource(new MySource())
 ## Exported utilities
 
 ```ts
-import { getBestThumbnail, isStreamExpired, SearchFilter, MusicKitErrorCode } from 'musicstream-sdk'
+import {
+  getBestThumbnail,
+  isStreamExpired,
+  resolveInput,
+  resolveSpotifyUrl,
+  SearchFilter,
+  MusicKitErrorCode,
+  parseLrc,
+  getActiveLine,
+  getActiveLineIndex,
+  formatTimestamp,
+  offsetLrc,
+  serializeLrc,
+} from 'musicstream-sdk'
 
-getBestThumbnail(song.thumbnails, 300)  // → Thumbnail | null — closest to 300px
-isStreamExpired(stream)                 // → boolean — true within 5min of expiry
+getBestThumbnail(song.thumbnails, 300)        // → Thumbnail | null — closest to 300px
+isStreamExpired(stream)                       // → boolean — true within 5min of expiry
+resolveInput('https://youtube.com/watch?v=X') // → videoId string
+resolveSpotifyUrl('https://open.spotify.com/track/...') // → "Title Artist" | null
+
+// LRC
+parseLrc(rawLrc)                 // → LyricLine[]
+getActiveLine(lines, currentSec) // → LyricLine | null
+getActiveLineIndex(lines, sec)   // → number (-1 if before first line)
+formatTimestamp(42.5)            // → "[00:42.50]"
+offsetLrc(lines, 1.0)            // → new LyricLine[] shifted by +1s
+serializeLrc(lines)              // → .lrc string
 
 SearchFilter.Songs      // 'songs'
 SearchFilter.Albums     // 'albums'
@@ -442,31 +615,50 @@ interface Section {
   title: string
   items: (Song | Album | Playlist)[]
 }
+
+interface Lyrics {
+  plain: string
+  synced: LyricLine[] | null   // null when source only has plain text
+}
+
+interface LyricLine {
+  time: number    // seconds (e.g. 17.73)
+  text: string
+  words?: LyricWord[]   // present only with enhanced LRC word-level timestamps
+}
+
+interface LyricWord {
+  time: number
+  text: string
+}
+
+interface PodcastEpisode {
+  type: 'episode'
+  guid: string
+  title: string
+  description: string
+  url: string         // direct audio URL
+  mimeType: string
+  duration: number    // seconds
+  publishedAt: string // ISO 8601
+  thumbnails: Thumbnail[]
+  season?: number
+  episode?: number
+  explicit: boolean
+}
+
+interface Podcast {
+  type: 'podcast'
+  feedUrl: string
+  title: string
+  description: string
+  author: string
+  language: string
+  link: string
+  thumbnails: Thumbnail[]
+  episodes: PodcastEpisode[]
+}
 ```
-
----
-
-## Examples
-
-Runnable examples for every feature are in [`examples/`](./examples/):
-
-| File | Covers |
-|------|--------|
-| [`01-quickstart.ts`](./examples/01-quickstart.ts) | Search + stream in 10 lines |
-| [`02-search.ts`](./examples/02-search.ts) | All filters, limit, URL inputs |
-| [`03-stream.ts`](./examples/03-stream.ts) | getStream, getTrack, getMetadata, isStreamExpired |
-| [`04-browse.ts`](./examples/04-browse.ts) | Home, artist, album, playlist, radio, charts |
-| [`05-download.ts`](./examples/05-download.ts) | Audio download with progress |
-| [`06-configuration.ts`](./examples/06-configuration.ts) | All config options |
-| [`07-events.ts`](./examples/07-events.ts) | Event system |
-| [`08-types-reference.ts`](./examples/08-types-reference.ts) | All types with annotations |
-| [`09-real-world.ts`](./examples/09-real-world.ts) | CLI player, Discord bot, player UI, infinite queue |
-| [`10-autocomplete.ts`](./examples/10-autocomplete.ts) | Autocomplete |
-| [`11-advanced-search.ts`](./examples/11-advanced-search.ts) | Pagination, limits, URL inputs |
-| [`12-related-and-radio.ts`](./examples/12-related-and-radio.ts) | getSuggestions, getRadio, getRelated |
-| [`13-custom-source.ts`](./examples/13-custom-source.ts) | Writing a custom AudioSource plugin |
-| [`14-lyrics.ts`](./examples/14-lyrics.ts) | getLyrics, lyrics + metadata together |
-| [`15-language-routing.ts`](./examples/15-language-routing.ts) | Language routing — JioSaavn vs YouTube Music, JIOSAAVN_LANGUAGES |
 
 ---
 
@@ -491,6 +683,7 @@ What this means in practice:
 
 - Node.js 22+
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) on PATH *(required for stream resolution and `download()`)*
+- `fpcalc` on PATH *(required for `identify()` only)*
 
 ## License
 

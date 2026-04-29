@@ -126,4 +126,56 @@ describe('Cache', () => {
       off.close()
     })
   })
+
+  // ── getStats ────────────────────────────────────────────────────────────────
+
+  describe('getStats', () => {
+    it('starts with zero hits and misses', () => {
+      const stats = cache.getStats()
+      expect(stats.hits).toBe(0)
+      expect(stats.misses).toBe(0)
+    })
+
+    it('increments hits on a successful get', () => {
+      cache.set('k', 'v', 60)
+      cache.get('k')
+      expect(cache.getStats().hits).toBe(1)
+    })
+
+    it('increments misses on a cache miss', () => {
+      cache.get('nonexistent')
+      expect(cache.getStats().misses).toBe(1)
+    })
+
+    it('increments misses on an expired entry', () => {
+      cache.set('k', 'v', -1) // already expired
+      cache.get('k')
+      expect(cache.getStats().misses).toBe(1)
+      expect(cache.getStats().hits).toBe(0)
+    })
+
+    it('tracks both hits and misses independently', () => {
+      cache.set('a', 1, 60)
+      cache.get('a') // hit
+      cache.get('a') // hit
+      cache.get('b') // miss
+      const stats = cache.getStats()
+      expect(stats.hits).toBe(2)
+      expect(stats.misses).toBe(1)
+    })
+
+    it('returns keys count matching live entries', () => {
+      cache.set('x', 1, 60)
+      cache.set('y', 2, 60)
+      expect(cache.getStats().keys).toBe(2)
+    })
+
+    it('returns zero stats when cache is disabled', () => {
+      const disabled = new Cache({ enabled: false })
+      const stats = disabled.getStats()
+      expect(stats.hits).toBe(0)
+      expect(stats.misses).toBe(0)
+      expect(stats.keys).toBe(0)
+    })
+  })
 })

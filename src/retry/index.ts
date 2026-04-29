@@ -1,5 +1,12 @@
 const NON_RETRYABLE = new Set([404, 410])
 
+export class NonRetryableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NonRetryableError'
+  }
+}
+
 export class HttpError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -46,6 +53,7 @@ export class RetryEngine {
       try {
         return await fn()
       } catch (err) {
+        if (err instanceof NonRetryableError) throw err
         if (err instanceof HttpError) {
           if (NON_RETRYABLE.has(err.statusCode)) throw err
 

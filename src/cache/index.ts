@@ -19,12 +19,15 @@ export class Cache {
 
   private db: DatabaseSync | null = null
   private readonly enabled: boolean
+  private hits = 0
+  private misses = 0
 
   constructor(options: CacheOptions) {
     this.enabled = options.enabled
     if (!this.enabled) return
 
     this.db = new DatabaseSync(options.path ?? ':memory:')
+    this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS cache (
         key TEXT PRIMARY KEY,
@@ -41,12 +44,14 @@ export class Cache {
       .prepare('SELECT value, expires_at FROM cache WHERE key = ?')
       .get(key) as { value: string; expires_at: number } | undefined
 
-    if (!row) return null
+    if (!row) { this.misses++; return null }
     if (Date.now() > row.expires_at) {
       this.db.prepare('DELETE FROM cache WHERE key = ?').run(key)
+      this.misses++
       return null
     }
 
+    this.hits++
     return JSON.parse(row.value) as T
   }
 
@@ -74,6 +79,12 @@ export class Cache {
     } catch {
       return true
     }
+  }
+
+  getStats(): { hits: number; misses: number; keys: number } {
+    if (!this.enabled || !this.db) return { hits: 0, misses: 0, keys: 0 }
+    const row = this.db.prepare('SELECT COUNT(*) as count FROM cache WHERE expires_at > ?').get(Date.now()) as { count: number }
+    return { hits: this.hits, misses: this.misses, keys: row.count }
   }
 
   close(): void {

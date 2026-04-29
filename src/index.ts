@@ -1,7 +1,7 @@
 export { MusicKit } from './musickit'
 export { Cache } from './cache'
 export { RateLimiter } from './rate-limiter'
-export { RetryEngine, HttpError } from './retry'
+export { RetryEngine, HttpError, NonRetryableError } from './retry'
 export {
   MusicKitBaseError,
   NotFoundError,

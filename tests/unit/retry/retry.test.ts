@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { RetryEngine, HttpError } from '../../../src/retry'
+import { RetryEngine, HttpError, NonRetryableError } from '../../../src/retry'
 
 describe('RetryEngine', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -162,6 +162,24 @@ describe('RetryEngine', () => {
 
       await expect(engine.execute(fn, 'stream')).rejects.toThrow()
       expect(fn).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('NonRetryableError — caller-signalled abort', () => {
+    it('stops immediately without retrying when fn throws NonRetryableError', async () => {
+      const engine = new RetryEngine({ maxAttempts: 3, backoffBase: 10 })
+      const fn = vi.fn().mockRejectedValue(new NonRetryableError('invalid api key'))
+
+      await expect(engine.execute(fn, 'search')).rejects.toThrow('invalid api key')
+      expect(fn).toHaveBeenCalledTimes(1)
+    })
+
+    it('is an instance of Error', () => {
+      expect(new NonRetryableError('x')).toBeInstanceOf(Error)
+    })
+
+    it('preserves the message', () => {
+      expect(new NonRetryableError('bad token').message).toBe('bad token')
     })
   })
 })

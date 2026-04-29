@@ -174,6 +174,31 @@ interface MusicKitError extends Error {
     statusCode?: number;
 }
 type MusicKitEvent = 'beforeRequest' | 'afterRequest' | 'cacheHit' | 'cacheMiss' | 'rateLimited' | 'visitorIdRefreshed' | 'retry' | 'error';
+interface PodcastEpisode {
+    type: 'episode';
+    guid: string;
+    title: string;
+    description: string;
+    url: string;
+    mimeType: string;
+    duration: number;
+    publishedAt: string;
+    thumbnails: Thumbnail[];
+    season?: number;
+    episode?: number;
+    explicit: boolean;
+}
+interface Podcast {
+    type: 'podcast';
+    feedUrl: string;
+    title: string;
+    description: string;
+    author: string;
+    language: string;
+    link: string;
+    thumbnails: Thumbnail[];
+    episodes: PodcastEpisode[];
+}
 
 type EventMap = {
     beforeRequest: [req: {
@@ -241,6 +266,7 @@ declare class MusicKit {
     private _stream;
     private _downloader;
     private _identifier;
+    private _podcast;
     private _ytPromise;
     constructor(config?: MusicKitConfig, _yt?: Innertube);
     static create(config?: MusicKitConfig): Promise<MusicKit>;
@@ -307,6 +333,7 @@ declare class MusicKit {
     streamAudio(id: string): Promise<NodeJS.ReadableStream>;
     identify(filePath: string): Promise<Song | null>;
     streamPCM(id: string): Promise<NodeJS.ReadableStream>;
+    getPodcast(feedUrl: string): Promise<Podcast>;
 }
 
 interface CacheOptions {
@@ -474,6 +501,28 @@ declare class Downloader {
     private readWithProgress;
 }
 
+type RepeatMode = 'off' | 'one' | 'all';
+declare class Queue<T extends Song = Song> {
+    private _current;
+    private _upcoming;
+    private _history;
+    repeat: RepeatMode;
+    get current(): T | null;
+    get upcoming(): T[];
+    get history(): T[];
+    get size(): number;
+    get isEmpty(): boolean;
+    add(track: T): void;
+    playNext(track: T): void;
+    next(): T | null;
+    previous(): T | null;
+    clear(): void;
+    remove(index: number): void;
+    move(from: number, to: number): void;
+    skipTo(index: number): void;
+    shuffle(): void;
+}
+
 interface IdentifyResult {
     artist: string;
     title: string;
@@ -493,8 +542,6 @@ declare class Identifier {
     }>;
     recognizeWithSongrec(filePath: string): Promise<IdentifyResult | null>;
     private extractClip;
-    private decodeToPCM;
-    private buildFakeAudioBuffer;
 }
 
 interface LoggerConfig {
@@ -525,6 +572,29 @@ declare function getBestThumbnail(thumbnails: Thumbnail[], targetSize: number): 
  * Returns true if the stream URL has expired or will expire within 5 minutes.
  */
 declare function isStreamExpired(stream: StreamingData): boolean;
+
+/**
+ * Resolves any URL to the canonical ID or query string the source pipeline expects.
+ *
+ * JioSaavn song/album/artist/playlist URL  → "jio:{id}"
+ * youtube.com/watch?v=ID, youtu.be/ID       → "ID"
+ * music.youtube.com/watch?v=ID              → "ID"
+ * music.youtube.com/browse/BROWSE_ID        → "BROWSE_ID"
+ * music.youtube.com/playlist?list=ID        → "ID"
+ * music.youtube.com/search?q=QUERY          → decoded query string
+ * Everything else                           → input unchanged
+ */
+declare function resolveInput(input: string): string;
+/**
+ * Resolves a Spotify track URL to a "Title Artist" search query by scraping
+ * the open.spotify.com page title. Returns null for non-track URLs or failures.
+ */
+declare function resolveSpotifyUrl(url: string): Promise<string | null>;
+
+declare class PodcastClient {
+    getFeed(url: string): Promise<Podcast>;
+    parse(xml: string, feedUrl: string): Promise<Podcast>;
+}
 
 declare const JIOSAAVN_LANGUAGES: Set<string>;
 
@@ -594,4 +664,4 @@ declare function safeParseAlbum(data: unknown): Album | null;
 declare function safeParseArtist(data: unknown): Artist | null;
 declare function safeParsePlaylist(data: unknown): Playlist | null;
 
-export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, JIOSAAVN_LANGUAGES, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Quality, type RateLimitConfig, RateLimitError, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };
+export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, JIOSAAVN_LANGUAGES, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };

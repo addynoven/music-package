@@ -47,6 +47,8 @@ __export(index_exports, {
   NonRetryableError: () => NonRetryableError,
   NotFoundError: () => NotFoundError,
   PlaylistSchema: () => PlaylistSchema,
+  PodcastClient: () => PodcastClient,
+  Queue: () => Queue,
   RateLimitError: () => RateLimitError,
   RateLimiter: () => RateLimiter,
   RetryEngine: () => RetryEngine,
@@ -64,6 +66,8 @@ __export(index_exports, {
   isStreamExpired: () => isStreamExpired,
   offsetLrc: () => offsetLrc,
   parseLrc: () => parseLrc,
+  resolveInput: () => resolveInput,
+  resolveSpotifyUrl: () => resolveSpotifyUrl,
   safeParseAlbum: () => safeParseAlbum,
   safeParseArtist: () => safeParseArtist,
   safeParsePlaylist: () => safeParsePlaylist,
@@ -772,6 +776,7 @@ var StreamResolver = class {
 var import_node_fs = require("fs");
 var import_node_path = require("path");
 var import_node_child_process2 = require("child_process");
+var import_promises = require("stream/promises");
 
 // src/downloader/ytdlp-progress.ts
 var PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(MiB|KiB|GiB)/;
@@ -903,8 +908,8 @@ var Downloader = class {
     ]);
     ytdlp.stderr.resume();
     ffmpeg.stderr.resume();
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-    ytdlp.on("error", (err) => ffmpeg.stdin.destroy(err));
+    (0, import_promises.pipeline)(ytdlp.stdout, ffmpeg.stdin).catch(() => {
+    });
     return ffmpeg.stdout;
   }
   async download(videoId, options = {}) {
@@ -996,7 +1001,7 @@ var Downloader = class {
 
 // src/identifier/index.ts
 var import_node_child_process3 = require("child_process");
-var import_promises = require("fs/promises");
+var import_promises2 = require("fs/promises");
 var ACOUSTID_ENDPOINT = "https://api.acoustid.org/v2/lookup";
 var Identifier = class {
   constructor(options) {
@@ -1005,7 +1010,7 @@ var Identifier = class {
   async lookup(fingerprint, duration) {
     const params = new URLSearchParams({
       client: this.options.acoustidApiKey,
-      meta: "recordings+compress",
+      meta: "recordings recordings.compress",
       duration: String(Math.round(duration)),
       fingerprint
     });
@@ -1021,35 +1026,21 @@ var Identifier = class {
     if (!artist || !title) return null;
     return { artist, title, score: best.score };
   }
-  async fingerprint(filePath) {
-    const pcmBuffer = await this.decodeToPCM(filePath);
-    const sampleRate = 44100;
-    const channels = 1;
-    const duration = Math.floor(pcmBuffer.length / (4 * channels)) / sampleRate;
-    const fakeAudioBuffer = this.buildFakeAudioBuffer(pcmBuffer, sampleRate, channels);
-    const savedWindow = global.window;
-    global.window = {
-      AudioContext: class {
-        decodeAudioData() {
-          return Promise.resolve(fakeAudioBuffer);
+  fingerprint(filePath) {
+    return new Promise((resolve, reject) => {
+      (0, import_node_child_process3.execFile)("fpcalc", ["-json", filePath], (err, stdout) => {
+        if (err) {
+          reject(new Error(`fpcalc failed: ${err.message}`));
+          return;
         }
-      }
-    };
-    try {
-      const { processAudioFile } = await import("@unimusic/chromaprint");
-      const fileBytes = await (0, import_promises.readFile)(filePath);
-      const gen = processAudioFile(fileBytes.buffer);
-      const { value } = await gen.next();
-      if (!value) throw new Error("Chromaprint returned no fingerprint");
-      return { fingerprint: value, duration };
-    } finally {
-      if (savedWindow !== void 0) {
-        ;
-        global.window = savedWindow;
-      } else {
-        delete global.window;
-      }
-    }
+        try {
+          const data = JSON.parse(stdout);
+          resolve({ fingerprint: data.fingerprint, duration: data.duration });
+        } catch {
+          reject(new Error("fpcalc returned invalid JSON"));
+        }
+      });
+    });
   }
   async recognizeWithSongrec(filePath) {
     if (!this.options.songrecBin) return null;
@@ -1069,7 +1060,7 @@ var Identifier = class {
         });
       });
     } finally {
-      (0, import_promises.unlink)(clipPath).catch(() => {
+      (0, import_promises2.unlink)(clipPath).catch(() => {
       });
     }
     if (!output) return null;
@@ -1111,48 +1102,86 @@ var Identifier = class {
       });
     });
   }
-  decodeToPCM(filePath) {
-    return new Promise((resolve, reject) => {
-      const ffmpeg = (0, import_node_child_process3.spawn)("ffmpeg", [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        filePath,
-        "-ar",
-        "44100",
-        "-ac",
-        "1",
-        "-f",
-        "f32le",
-        "pipe:1"
-      ]);
-      const chunks = [];
-      ffmpeg.stdout.on("data", (chunk) => chunks.push(chunk));
-      ffmpeg.stderr.resume();
-      ffmpeg.on("error", (err) => reject(new Error(`ffmpeg not found: ${err.message}`)));
-      ffmpeg.on("close", (code) => {
-        if (code !== 0) reject(new Error(`ffmpeg decode failed (exit ${code})`));
-        else resolve(Buffer.concat(chunks));
-      });
-    });
+};
+
+// src/podcast/index.ts
+var import_rss_parser = __toESM(require("rss-parser"));
+var parser = new import_rss_parser.default({
+  customFields: {
+    feed: [
+      ["itunes:author", "author"],
+      ["itunes:image", "image"]
+    ],
+    item: [
+      ["itunes:duration", "duration"],
+      ["itunes:episode", "episode"],
+      ["itunes:season", "season"],
+      ["itunes:image", "episodeImage"],
+      ["itunes:explicit", "explicit"]
+    ]
   }
-  buildFakeAudioBuffer(pcmBuffer, sampleRate, channels) {
-    const length = Math.floor(pcmBuffer.length / (4 * channels));
+});
+var PodcastClient = class {
+  async getFeed(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new NetworkError(`RSS fetch failed: ${resp.status}`, resp.status);
+    const xml = await resp.text();
+    return this.parse(xml, url);
+  }
+  async parse(xml, feedUrl) {
+    const feed = await parser.parseString(xml);
+    const feedImageUrl = extractImageUrl(feed.image);
+    const feedThumbnails = feedImageUrl ? [{ url: feedImageUrl, width: 0, height: 0 }] : [];
+    const episodes = (feed.items ?? []).filter((item) => !!item.enclosure?.url).map((item) => {
+      const epImageUrl = extractImageUrl(item.episodeImage) ?? feedImageUrl;
+      const thumbnails = epImageUrl ? [{ url: epImageUrl, width: 0, height: 0 }] : [];
+      return {
+        type: "episode",
+        guid: item.guid ?? item.link ?? item.enclosure.url,
+        title: item.title ?? "Untitled",
+        description: item.contentSnippet ?? item.content ?? "",
+        url: item.enclosure.url,
+        mimeType: item.enclosure?.type ?? "audio/mpeg",
+        duration: parseDuration(item.duration),
+        publishedAt: item.pubDate ? new Date(item.pubDate).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+        thumbnails,
+        season: item.season ? parseInt(item.season) : void 0,
+        episode: item.episode ? parseInt(item.episode) : void 0,
+        explicit: item.explicit === "yes" || item.explicit === "true"
+      };
+    });
     return {
-      sampleRate,
-      numberOfChannels: channels,
-      length,
-      getChannelData: (channel) => {
-        const samples = new Float32Array(length);
-        for (let i = 0; i < length; i++) {
-          samples[i] = pcmBuffer.readFloatLE((i * channels + channel) * 4);
-        }
-        return samples;
-      }
+      type: "podcast",
+      feedUrl,
+      title: feed.title ?? "",
+      description: feed.description ?? "",
+      author: feed.author ?? "",
+      language: feed.language ?? "",
+      link: feed.link ?? "",
+      thumbnails: feedThumbnails,
+      episodes
     };
   }
 };
+function extractImageUrl(image) {
+  if (!image) return null;
+  if (typeof image === "string") return image;
+  if (typeof image === "object" && image !== null) {
+    const obj = image;
+    if (obj.$?.href) return obj.$.href;
+    if (obj.url) return obj.url;
+    if (obj.href) return obj.href;
+  }
+  return null;
+}
+function parseDuration(duration) {
+  if (!duration) return 0;
+  const trimmed = duration.trim();
+  const parts = trimmed.split(":").map(Number);
+  if (parts.length === 1) return isNaN(parts[0]) ? 0 : parts[0];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
 
 // src/events/index.ts
 var MusicKitEmitter = class {
@@ -1209,7 +1238,7 @@ var YouTubeMusicSource = class {
 
 // src/sources/youtube-data-api.ts
 var YT_API = "https://www.googleapis.com/youtube/v3";
-function parseDuration(iso) {
+function parseDuration2(iso) {
   const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!m) return 0;
   return parseInt(m[1] || "0") * 3600 + parseInt(m[2] || "0") * 60 + parseInt(m[3] || "0");
@@ -1263,7 +1292,7 @@ var YouTubeDataAPISource = class {
         videoId: id,
         title: detail.snippet.title,
         artist: detail.snippet.channelTitle,
-        duration: parseDuration(detail.contentDetails?.duration ?? ""),
+        duration: parseDuration2(detail.contentDetails?.duration ?? ""),
         thumbnails: mapThumbnails2(detail.snippet.thumbnails ?? {})
       };
     }).filter((s) => s !== null);
@@ -1282,7 +1311,7 @@ var YouTubeDataAPISource = class {
       videoId: id,
       title: item.snippet.title,
       artist: item.snippet.channelTitle,
-      duration: parseDuration(item.contentDetails?.duration ?? ""),
+      duration: parseDuration2(item.contentDetails?.duration ?? ""),
       thumbnails: mapThumbnails2(item.snippet.thumbnails ?? {})
     };
   }
@@ -1751,6 +1780,8 @@ async function fetchFromLyricsOvh(artist, title) {
 // src/utils/url-resolver.ts
 var JIOSAAVN_RE = /^https?:\/\/(?:www\.)?jiosaavn\.com\//;
 var YTM_BASE = "music.youtube.com";
+var SPOTIFY_TRACK_RE = /^https?:\/\/open\.spotify\.com\/track\//;
+var TITLE_RE = /<title[^>]*>([^<]+)<\/title>/i;
 function resolveInput(input) {
   if (!input) return input;
   const jio = resolveJioSaavnUrl(input);
@@ -1787,6 +1818,22 @@ function resolveYouTubeUrl(input) {
       return v || null;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+async function resolveSpotifyUrl(url) {
+  if (!SPOTIFY_TRACK_RE.test(url)) return null;
+  try {
+    const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const m = TITLE_RE.exec(html);
+    if (!m) return null;
+    let raw = m[1].trim();
+    raw = raw.replace(/\s*-\s*song\s+and\s+lyrics\s+by\s+/i, " ");
+    raw = raw.replace(/\s*\|\s*Spotify\s*$/i, "");
+    return raw.trim() || null;
   } catch {
     return null;
   }
@@ -1929,6 +1976,7 @@ var MusicKit = class _MusicKit {
     this._stream = null;
     this._downloader = null;
     this._identifier = null;
+    this._podcast = null;
     this._ytPromise = null;
     this.config = config;
     this.sourceOrder = resolveSourceOrder(config.sourceOrder);
@@ -2320,6 +2368,10 @@ var MusicKit = class _MusicKit {
       return this._downloader.streamPCM(resolved);
     }
   }
+  async getPodcast(feedUrl) {
+    if (!this._podcast) this._podcast = new PodcastClient();
+    return this._podcast.getFeed(feedUrl);
+  }
 };
 var TITLE_NOISE2 = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi;
 var ARTIST_NOISE = /\s*([-–—].*|VEVO|Official|Music|Records?|Productions?)$/i;
@@ -2331,6 +2383,81 @@ function sanitizeTitle(t) {
 function sanitizeArtist(a) {
   return a.replace(ARTIST_NOISE, "").trim();
 }
+
+// src/queue/index.ts
+var Queue = class {
+  constructor() {
+    this._current = null;
+    this._upcoming = [];
+    this._history = [];
+    this.repeat = "off";
+  }
+  get current() {
+    return this._current;
+  }
+  get upcoming() {
+    return [...this._upcoming];
+  }
+  get history() {
+    return [...this._history];
+  }
+  get size() {
+    return this._upcoming.length;
+  }
+  get isEmpty() {
+    return this._upcoming.length === 0 && this._current === null;
+  }
+  add(track) {
+    this._upcoming.push(track);
+  }
+  playNext(track) {
+    this._upcoming.unshift(track);
+  }
+  next() {
+    if (this.repeat === "one" && this._current) {
+      return this._current;
+    }
+    if (this._upcoming.length === 0) {
+      if (this.repeat === "all" && (this._history.length > 0 || this._current)) {
+        if (this._current) this._history.push(this._current);
+        this._upcoming = [...this._history];
+        this._history = [];
+        this._current = null;
+      } else {
+        return null;
+      }
+    }
+    if (this._current) this._history.push(this._current);
+    this._current = this._upcoming.shift();
+    return this._current;
+  }
+  previous() {
+    if (this._history.length === 0) return null;
+    if (this._current) this._upcoming.unshift(this._current);
+    this._current = this._history.pop();
+    return this._current;
+  }
+  clear() {
+    this._upcoming = [];
+  }
+  remove(index) {
+    this._upcoming.splice(index, 1);
+  }
+  move(from, to) {
+    if (from === to) return;
+    const [track] = this._upcoming.splice(from, 1);
+    this._upcoming.splice(to, 0, track);
+  }
+  skipTo(index) {
+    this._upcoming = this._upcoming.slice(index);
+  }
+  shuffle() {
+    for (let i = this._upcoming.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this._upcoming[i], this._upcoming[j]] = [this._upcoming[j], this._upcoming[i]];
+    }
+  }
+};
 
 // package.json
 var version = "1.0.1";
@@ -2382,6 +2509,8 @@ function getBestThumbnail(thumbnails, targetSize) {
   NonRetryableError,
   NotFoundError,
   PlaylistSchema,
+  PodcastClient,
+  Queue,
   RateLimitError,
   RateLimiter,
   RetryEngine,
@@ -2399,6 +2528,8 @@ function getBestThumbnail(thumbnails, targetSize) {
   isStreamExpired,
   offsetLrc,
   parseLrc,
+  resolveInput,
+  resolveSpotifyUrl,
   safeParseAlbum,
   safeParseArtist,
   safeParsePlaylist,

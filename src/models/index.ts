@@ -169,6 +169,10 @@ export interface MusicKitConfig {
   sourceOrder?: SourcePreference
   cookiesPath?: string
   youtubeApiKey?: string
+  identify?: {
+    acoustidApiKey: string
+    songrecBin?: string
+  }
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

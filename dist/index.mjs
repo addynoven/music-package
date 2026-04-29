@@ -7,9 +7,12 @@ var URL_EXPIRY_BUFFER = 1800;
 var Cache = class {
   constructor(options) {
     this.db = null;
+    this.hits = 0;
+    this.misses = 0;
     this.enabled = options.enabled;
     if (!this.enabled) return;
     this.db = new DatabaseSync(options.path ?? ":memory:");
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS cache (
         key TEXT PRIMARY KEY,
@@ -17,15 +20,21 @@ var Cache = class {
         expires_at INTEGER NOT NULL
       )
     `);
+    this.sweep();
   }
   get(key) {
     if (!this.enabled || !this.db) return null;
     const row = this.db.prepare("SELECT value, expires_at FROM cache WHERE key = ?").get(key);
-    if (!row) return null;
-    if (Date.now() > row.expires_at) {
-      this.db.prepare("DELETE FROM cache WHERE key = ?").run(key);
+    if (!row) {
+      this.misses++;
       return null;
     }
+    if (Date.now() > row.expires_at) {
+      this.db.prepare("DELETE FROM cache WHERE key = ?").run(key);
+      this.misses++;
+      return null;
+    }
+    this.hits++;
     return JSON.parse(row.value);
   }
   set(key, value, ttlSeconds) {
@@ -49,6 +58,16 @@ var Cache = class {
     } catch {
       return true;
     }
+  }
+  sweep() {
+    if (!this.enabled || !this.db) return 0;
+    const result = this.db.prepare("DELETE FROM cache WHERE expires_at < ?").run(Date.now());
+    return result.changes;
+  }
+  getStats() {
+    if (!this.enabled || !this.db) return { hits: 0, misses: 0, keys: 0 };
+    const row = this.db.prepare("SELECT COUNT(*) as count FROM cache WHERE expires_at > ?").get(Date.now());
+    return { hits: this.hits, misses: this.misses, keys: row.count };
   }
   close() {
     this.db?.close();
@@ -79,10 +98,10 @@ var RateLimiter = class {
       autocomplete: limits.autocomplete ?? 30
     };
   }
-  async throttle(endpoint, onLimited) {
+  async throttle(endpoint, onLimited, weight = 1) {
     const waited = await this.enforceMinGap();
     if (waited > 0) onLimited?.(endpoint, waited);
-    this.consumeToken(endpoint);
+    this.consumeToken(endpoint, weight);
   }
   getWaitTime(endpoint) {
     const bucket = this.getBucket(endpoint);
@@ -100,10 +119,10 @@ var RateLimiter = class {
     this.lastRequestAt = Date.now();
     return 0;
   }
-  consumeToken(endpoint) {
+  consumeToken(endpoint, weight = 1) {
     const bucket = this.getBucket(endpoint);
     this.refillIfNeeded(bucket);
-    if (bucket.tokens > 0) bucket.tokens--;
+    bucket.tokens = Math.max(0, bucket.tokens - weight);
   }
   getBucket(endpoint) {
     if (!this.buckets.has(endpoint)) {
@@ -125,6 +144,12 @@ function delay(ms) {
 
 // src/retry/index.ts
 var NON_RETRYABLE = /* @__PURE__ */ new Set([404, 410]);
+var NonRetryableError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "NonRetryableError";
+  }
+};
 var HttpError = class extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -148,6 +173,7 @@ var RetryEngine = class {
       try {
         return await fn();
       } catch (err) {
+        if (err instanceof NonRetryableError) throw err;
         if (err instanceof HttpError) {
           if (NON_RETRYABLE.has(err.statusCode)) throw err;
           if (err.statusCode === 429) {
@@ -230,6 +256,109 @@ var SessionManager = class {
     }
   }
 };
+
+// src/errors/index.ts
+var MusicKitBaseError = class extends Error {
+  constructor(message, code) {
+    super(message);
+    this.name = "MusicKitBaseError";
+    this.code = code;
+    if (Error.captureStackTrace) Error.captureStackTrace(this, this.constructor);
+  }
+};
+var NotFoundError = class extends MusicKitBaseError {
+  constructor(message, resourceId) {
+    super(message, "NOT_FOUND");
+    this.name = "NotFoundError";
+    this.resourceId = resourceId;
+  }
+};
+var RateLimitError = class extends MusicKitBaseError {
+  constructor(message, retryAfterMs) {
+    super(message, "RATE_LIMITED");
+    this.name = "RateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+};
+var NetworkError = class extends MusicKitBaseError {
+  constructor(message, statusCode, cause) {
+    super(message, "NETWORK_ERROR");
+    this.name = "NetworkError";
+    this.statusCode = statusCode;
+    this.cause = cause;
+  }
+};
+var ValidationError = class extends MusicKitBaseError {
+  constructor(message, field) {
+    super(message, "VALIDATION_ERROR");
+    this.name = "ValidationError";
+    this.field = field;
+  }
+};
+var StreamError = class extends MusicKitBaseError {
+  constructor(message, videoId) {
+    super(message, "STREAM_ERROR");
+    this.name = "StreamError";
+    this.videoId = videoId;
+  }
+};
+
+// src/schemas/index.ts
+import { z } from "zod";
+var ThumbnailSchema = z.object({
+  url: z.string(),
+  width: z.number(),
+  height: z.number()
+});
+var SongSchema = z.object({
+  type: z.literal("song"),
+  videoId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  duration: z.number(),
+  thumbnails: z.array(ThumbnailSchema),
+  album: z.string().optional()
+});
+var AlbumSchema = z.object({
+  type: z.literal("album"),
+  browseId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  year: z.string().optional(),
+  thumbnails: z.array(ThumbnailSchema),
+  tracks: z.array(z.any())
+});
+var ArtistSchema = z.object({
+  type: z.literal("artist"),
+  channelId: z.string().min(1),
+  name: z.string().min(1),
+  thumbnails: z.array(ThumbnailSchema),
+  songs: z.array(z.any()),
+  albums: z.array(z.any()),
+  singles: z.array(z.any())
+});
+var PlaylistSchema = z.object({
+  type: z.literal("playlist"),
+  playlistId: z.string().min(1),
+  title: z.string().min(1),
+  thumbnails: z.array(ThumbnailSchema)
+});
+function safeParseSong(data) {
+  const result = SongSchema.safeParse(data);
+  return result.success ? result.data : null;
+}
+function safeParseAlbum(data) {
+  const result = AlbumSchema.safeParse(data);
+  return result.success ? result.data : null;
+}
+function safeParseArtist(data) {
+  const result = ArtistSchema.safeParse(data);
+  return result.success ? result.data : null;
+}
+function safeParsePlaylist(data) {
+  const result = PlaylistSchema.safeParse(data);
+  return result.success ? result.data : null;
+}
 
 // src/discovery/index.ts
 function extractText(value) {
@@ -351,18 +480,18 @@ var DiscoveryClient = class {
     if (options?.filter) {
       const res2 = await this.yt.music.search(query, { type: typeMap[options.filter] });
       const items = flatContents(res2);
-      if (options.filter === "songs") return items.map(mapSongItem);
-      if (options.filter === "albums") return items.map(mapAlbumItem);
-      if (options.filter === "artists") return items.map(mapArtistItem);
-      if (options.filter === "playlists") return items.map(mapPlaylistItem);
+      if (options.filter === "songs") return items.map(mapSongItem).filter((s) => safeParseSong(s) !== null);
+      if (options.filter === "albums") return items.map(mapAlbumItem).filter((a) => safeParseAlbum(a) !== null);
+      if (options.filter === "artists") return items.map(mapArtistItem).filter((a) => safeParseArtist(a) !== null);
+      if (options.filter === "playlists") return items.map(mapPlaylistItem).filter((p) => safeParsePlaylist(p) !== null);
       return [];
     }
     const res = await this.yt.music.search(query);
     const all = flatContents(res);
     return {
-      songs: all.filter((i) => i.item_type === "song" || i.duration?.seconds).map(mapSongItem),
-      albums: all.filter((i) => i.item_type === "album").map(mapAlbumItem),
-      artists: all.filter((i) => i.item_type === "artist").map(mapArtistItem),
+      songs: all.filter((i) => i.item_type === "song" || i.duration?.seconds).map(mapSongItem).filter((s) => safeParseSong(s) !== null),
+      albums: all.filter((i) => i.item_type === "album").map(mapAlbumItem).filter((a) => safeParseAlbum(a) !== null),
+      artists: all.filter((i) => i.item_type === "artist").map(mapArtistItem).filter((a) => safeParseArtist(a) !== null),
       playlists: []
     };
   }
@@ -375,7 +504,7 @@ var DiscoveryClient = class {
   }
   async getArtist(channelId) {
     const res = await this.yt.music.getArtist(channelId);
-    if (!res) throw new Error(`Artist not found: ${channelId}`);
+    if (!res) throw new NotFoundError(`Artist not found: ${channelId}`, channelId);
     const name = extractText(res.header?.title) || "Unknown";
     const songs = [];
     const albums = [];
@@ -402,7 +531,7 @@ var DiscoveryClient = class {
   }
   async getAlbum(browseId) {
     const res = await this.yt.music.getAlbum(browseId);
-    if (!res) throw new Error(`Album not found: ${browseId}`);
+    if (!res) throw new NotFoundError(`Album not found: ${browseId}`, browseId);
     const header = res.header;
     const year = header?.year || parseAlbumSubtitle(header?.subtitle?.runs).year || void 0;
     const artist = extractText(header?.author?.name) || extractText(header?.strapline_text_one) || parseAlbumSubtitle(header?.subtitle?.runs).artist;
@@ -429,7 +558,7 @@ var DiscoveryClient = class {
   }
   async getPlaylist(playlistId) {
     const res = await this.yt.music.getPlaylist(playlistId);
-    if (!res) throw new Error(`Playlist not found: ${playlistId}`);
+    if (!res) throw new NotFoundError(`Playlist not found: ${playlistId}`, playlistId);
     const header = res.header ?? {};
     const tracks = (res.contents ?? res.items ?? []).map((item) => item.primary ?? item).filter((item) => item?.video_id || item?.id).map(mapSongItem);
     return {
@@ -458,6 +587,33 @@ var DiscoveryClient = class {
       }
     }
   }
+  async getMoodCategories() {
+    try {
+      const res = await this.yt.music.getExplore?.() ?? { sections: [] };
+      for (const section of res.sections ?? []) {
+        const title = extractText(section.header?.title) || extractText(section.title) || "";
+        if (!title.toLowerCase().includes("mood")) continue;
+        return (section.contents ?? []).map((item) => ({
+          title: extractText(item.title) || "",
+          params: item.params ?? item.endpoint?.payload?.params ?? ""
+        })).filter((c) => c.title && c.params);
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+  async getMoodPlaylists(params) {
+    try {
+      const res = await this.yt.music.getExplore?.({ params }) ?? { sections: [] };
+      return (res.sections ?? []).map((s) => ({
+        title: extractText(s.title) || extractText(s.header?.title) || "",
+        items: (s.contents ?? []).map(mapPlaylistItem)
+      })).filter((s) => !isEmptySection(s.title, s.items));
+    } catch {
+      return [];
+    }
+  }
   async getCharts(options) {
     const res = await this.yt.music.getExplore?.(options) ?? { sections: [] };
     return (res.sections ?? res.contents ?? []).map((s) => ({
@@ -472,22 +628,6 @@ var DiscoveryClient = class {
 
 // src/stream/index.ts
 import { execFile } from "child_process";
-import { Platform } from "youtubei.js/agnostic";
-function patchEvalIfNeeded() {
-  try {
-    const shim = Platform.shim;
-    if (shim && typeof shim.eval === "function") {
-      Platform.load({
-        ...shim,
-        eval: (data, env) => {
-          const fn = new Function(...Object.keys(env), data.output ?? data);
-          return fn(...Object.values(env));
-        }
-      });
-    }
-  } catch {
-  }
-}
 function parseExpiry(url) {
   try {
     return parseInt(new URL(url).searchParams.get("expire") ?? "0", 10);
@@ -508,20 +648,23 @@ function ytdlpResolve(videoId, quality, cookiesPath) {
       `https://music.youtube.com/watch?v=${videoId}`
     ], (err, stdout) => {
       try {
-        if (!stdout?.trim()) throw new Error("no output");
+        if (!stdout?.trim()) throw new StreamError("no output", videoId);
         const json = JSON.parse(stdout);
         const url = json.url;
-        if (!url) throw new Error("no url in output");
+        if (!url) throw new StreamError("no url in output", videoId);
         const acodec = json.acodec ?? "";
         const codec = acodec.includes("opus") ? "opus" : "mp4a";
+        const mimeType = codec === "opus" ? "audio/webm; codecs=opus" : "audio/mp4";
         const bitrateKbps = json.abr ?? json.tbr ?? 0;
         const sizeBytes = json.filesize ?? json.filesize_approx ?? void 0;
         resolve({
           url,
           codec,
+          mimeType,
           bitrate: Math.round(bitrateKbps * 1e3),
           expiresAt: parseExpiry(url),
-          ...sizeBytes != null && { sizeBytes }
+          ...sizeBytes != null && { sizeBytes },
+          _meta: { title: json.title ?? "", artist: json.artist ?? json.uploader ?? "" }
         });
       } catch (parseErr) {
         reject(new Error(
@@ -532,11 +675,9 @@ function ytdlpResolve(videoId, quality, cookiesPath) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, yt, cookiesPath) {
+  constructor(cache, cookiesPath) {
     this.cache = cache;
-    this.yt = yt;
     this.cookiesPath = cookiesPath;
-    patchEvalIfNeeded();
   }
   async resolve(videoId, quality = "high") {
     const raw = typeof quality === "string" ? quality : quality.quality ?? "high";
@@ -556,11 +697,29 @@ var StreamResolver = class {
 import { createWriteStream } from "fs";
 import { join } from "path";
 import { spawn } from "child_process";
+
+// src/downloader/ytdlp-progress.ts
+var PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(MiB|KiB|GiB)/;
+var UNIT_BYTES = {
+  KiB: 1024,
+  MiB: 1024 * 1024,
+  GiB: 1024 * 1024 * 1024
+};
+function parseYtdlpProgress(line) {
+  const m = line.match(PROGRESS_RE);
+  if (!m) return null;
+  const percent = Math.min(100, Math.max(0, Math.floor(parseFloat(m[1]))));
+  const totalBytes = parseFloat(m[2]) * (UNIT_BYTES[m[3]] ?? 1);
+  const bytesDownloaded = totalBytes * (percent / 100);
+  return { percent, totalBytes, bytesDownloaded };
+}
+
+// src/downloader/index.ts
 var INVALID_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
 function sanitize(name) {
   return name.replace(INVALID_CHARS, "").trim();
 }
-function ytdlpDownload(videoId, destFile, format, cookiesPath) {
+function ytdlpDownload(videoId, destFile, format, cookiesPath, filename, onProgress) {
   return new Promise((resolve, reject) => {
     const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
     const proc = spawn("yt-dlp", [
@@ -575,13 +734,21 @@ function ytdlpDownload(videoId, destFile, format, cookiesPath) {
       "-x",
       "--audio-format",
       format,
+      "--embed-metadata",
       "-o",
       destFile,
       `https://music.youtube.com/watch?v=${videoId}`
     ]);
     let err = "";
     proc.stderr.on("data", (d) => {
-      err += d;
+      const text = d.toString();
+      err += text;
+      if (onProgress && filename) {
+        for (const line of text.split("\n")) {
+          const parsed = parseYtdlpProgress(line);
+          if (parsed) onProgress({ ...parsed, filename });
+        }
+      }
     });
     proc.on("error", (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)));
     proc.on("close", (code) => {
@@ -668,34 +835,29 @@ var Downloader = class {
   async download(videoId, options = {}) {
     const format = options.format ?? "opus";
     const codec = format === "m4a" ? "mp4a" : "opus";
-    const [stream, song] = await Promise.all([
-      this.resolver.resolve(videoId, { codec }),
-      options._mockSong ? Promise.resolve(options._mockSong) : this.discovery.getInfo(videoId)
-    ]);
-    const filename = `${sanitize(song.title)} (${sanitize(song.artist)}).${format}`;
+    const stream = await this.resolver.resolve(videoId, { codec });
+    const meta = stream._meta;
+    let title = meta?.title || "";
+    let artist = meta?.artist || "";
+    if ((!title || !artist) && !options._mockSong) {
+      const song = await this.discovery.getInfo(videoId);
+      title = title || song.title;
+      artist = artist || song.artist;
+    } else if (options._mockSong) {
+      title = options._mockSong.title;
+      artist = options._mockSong.artist;
+    }
+    const filename = `${sanitize(title || videoId)} (${sanitize(artist)}).${format}`;
     const dest = join(options.path ?? ".", filename);
     if (options._mockReadStream) {
-      const writeStream2 = createWriteStream(dest);
-      return this.readWithProgress(options._mockReadStream, writeStream2, stream.sizeBytes, options.onProgress);
+      const writeStream = createWriteStream(dest);
+      return this.readWithProgress(options._mockReadStream, writeStream, filename, stream.sizeBytes, options.onProgress);
     }
     const { mkdir } = await import("fs/promises");
     await mkdir(options.path ?? ".", { recursive: true });
-    const writeStream = createWriteStream(dest);
-    try {
-      await this.fetchAndWrite(stream.url, writeStream, stream.sizeBytes, options.onProgress);
-    } catch (err) {
-      writeStream.destroy();
-      if (err.message?.includes("403") || err.message?.includes("audio fetch failed")) {
-        const { unlink } = await import("fs/promises");
-        await unlink(dest).catch(() => {
-        });
-        await ytdlpDownload(videoId, dest, format, this.cookiesPath);
-      } else {
-        throw err;
-      }
-    }
+    await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress);
   }
-  async fetchAndWrite(url, writeStream, totalBytes, onProgress) {
+  async fetchAndWrite(url, writeStream, filename, totalBytes, onProgress) {
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -704,7 +866,7 @@ var Downloader = class {
       }
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: audio fetch failed`);
+      throw new NetworkError(`HTTP ${response.status}: audio fetch failed`, response.status);
     }
     const { Readable } = await import("stream");
     const readable = Readable.fromWeb(response.body);
@@ -717,8 +879,13 @@ var Downloader = class {
       readable.on("data", (chunk) => {
         writeStream.write(chunk);
         downloaded += chunk.length;
-        if (onProgress && totalBytes) {
-          onProgress(Math.round(downloaded / totalBytes * 100));
+        if (onProgress) {
+          onProgress({
+            percent: totalBytes ? Math.min(100, Math.round(downloaded / totalBytes * 100)) : 0,
+            bytesDownloaded: downloaded,
+            totalBytes,
+            filename
+          });
         }
       });
       readable.on("error", (err) => {
@@ -731,13 +898,18 @@ var Downloader = class {
       });
     });
   }
-  readWithProgress(readable, writeStream, totalBytes, onProgress) {
+  readWithProgress(readable, writeStream, filename, totalBytes, onProgress) {
     return new Promise((resolve, reject) => {
       let downloaded = 0;
       readable.on("data", (chunk) => {
         downloaded += chunk.length;
-        if (onProgress && totalBytes) {
-          onProgress(Math.round(downloaded / totalBytes * 100));
+        if (onProgress) {
+          onProgress({
+            percent: totalBytes ? Math.min(100, Math.round(downloaded / totalBytes * 100)) : 0,
+            bytesDownloaded: downloaded,
+            totalBytes,
+            filename
+          });
         }
       });
       readable.on("error", reject);
@@ -747,17 +919,192 @@ var Downloader = class {
   }
 };
 
+// src/identifier/index.ts
+import { spawn as spawn2 } from "child_process";
+import { readFile, unlink } from "fs/promises";
+var ACOUSTID_ENDPOINT = "https://api.acoustid.org/v2/lookup";
+var Identifier = class {
+  constructor(options) {
+    this.options = options;
+  }
+  async lookup(fingerprint, duration) {
+    const params = new URLSearchParams({
+      client: this.options.acoustidApiKey,
+      meta: "recordings+compress",
+      duration: String(Math.round(duration)),
+      fingerprint
+    });
+    const response = await fetch(`${ACOUSTID_ENDPOINT}?${params}`);
+    if (!response.ok) throw new NetworkError(`AcoustID API error: ${response.status}`, response.status);
+    const data = await response.json();
+    if (data.status !== "ok" || !data.results?.length) return null;
+    const best = [...data.results].filter((r) => r.recordings?.length).sort((a, b) => b.score - a.score)[0];
+    if (!best) return null;
+    const recording = best.recordings[0];
+    const artist = recording.artists?.[0]?.name ?? "";
+    const title = recording.title ?? "";
+    if (!artist || !title) return null;
+    return { artist, title, score: best.score };
+  }
+  async fingerprint(filePath) {
+    const pcmBuffer = await this.decodeToPCM(filePath);
+    const sampleRate = 44100;
+    const channels = 1;
+    const duration = Math.floor(pcmBuffer.length / (4 * channels)) / sampleRate;
+    const fakeAudioBuffer = this.buildFakeAudioBuffer(pcmBuffer, sampleRate, channels);
+    const savedWindow = global.window;
+    global.window = {
+      AudioContext: class {
+        decodeAudioData() {
+          return Promise.resolve(fakeAudioBuffer);
+        }
+      }
+    };
+    try {
+      const { processAudioFile } = await import("@unimusic/chromaprint");
+      const fileBytes = await readFile(filePath);
+      const gen = processAudioFile(fileBytes.buffer);
+      const { value } = await gen.next();
+      if (!value) throw new Error("Chromaprint returned no fingerprint");
+      return { fingerprint: value, duration };
+    } finally {
+      if (savedWindow !== void 0) {
+        ;
+        global.window = savedWindow;
+      } else {
+        delete global.window;
+      }
+    }
+  }
+  async recognizeWithSongrec(filePath) {
+    if (!this.options.songrecBin) return null;
+    const clipPath = `/tmp/songrec-clip-${Date.now()}.wav`;
+    await this.extractClip(filePath, clipPath);
+    let output;
+    try {
+      output = await new Promise((resolve, reject) => {
+        const proc = spawn2(this.options.songrecBin, ["audio-file-to-recognized-song", clipPath]);
+        const chunks = [];
+        proc.stdout.on("data", (chunk) => chunks.push(chunk));
+        proc.stderr.resume();
+        proc.on("error", (err) => reject(new Error(`songrec spawn failed: ${err.message}`)));
+        proc.on("close", (code) => {
+          if (code !== 0) resolve("");
+          else resolve(Buffer.concat(chunks).toString("utf8").trim());
+        });
+      });
+    } finally {
+      unlink(clipPath).catch(() => {
+      });
+    }
+    if (!output) return null;
+    try {
+      const data = JSON.parse(output);
+      const track = data?.track;
+      if (!track?.title || !track?.subtitle) return null;
+      return { artist: track.subtitle, title: track.title, score: 1 };
+    } catch {
+      return null;
+    }
+  }
+  extractClip(inputPath, outputPath) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn2("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "60",
+        "-t",
+        "10",
+        "-i",
+        inputPath,
+        "-ar",
+        "44100",
+        "-ac",
+        "1",
+        "-f",
+        "wav",
+        "-y",
+        outputPath
+      ]);
+      proc.stderr.resume();
+      proc.on("error", (err) => reject(new Error(`ffmpeg clip failed: ${err.message}`)));
+      proc.on("close", (code) => {
+        if (code !== 0) reject(new Error(`ffmpeg clip exited ${code}`));
+        else resolve();
+      });
+    });
+  }
+  decodeToPCM(filePath) {
+    return new Promise((resolve, reject) => {
+      const ffmpeg = spawn2("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        filePath,
+        "-ar",
+        "44100",
+        "-ac",
+        "1",
+        "-f",
+        "f32le",
+        "pipe:1"
+      ]);
+      const chunks = [];
+      ffmpeg.stdout.on("data", (chunk) => chunks.push(chunk));
+      ffmpeg.stderr.resume();
+      ffmpeg.on("error", (err) => reject(new Error(`ffmpeg not found: ${err.message}`)));
+      ffmpeg.on("close", (code) => {
+        if (code !== 0) reject(new Error(`ffmpeg decode failed (exit ${code})`));
+        else resolve(Buffer.concat(chunks));
+      });
+    });
+  }
+  buildFakeAudioBuffer(pcmBuffer, sampleRate, channels) {
+    const length = Math.floor(pcmBuffer.length / (4 * channels));
+    return {
+      sampleRate,
+      numberOfChannels: channels,
+      length,
+      getChannelData: (channel) => {
+        const samples = new Float32Array(length);
+        for (let i = 0; i < length; i++) {
+          samples[i] = pcmBuffer.readFloatLE((i * channels + channel) * 4);
+        }
+        return samples;
+      }
+    };
+  }
+};
+
 // src/events/index.ts
 var MusicKitEmitter = class {
   constructor() {
     this.handlers = /* @__PURE__ */ new Map();
+    this.onceMap = /* @__PURE__ */ new Map();
   }
   on(event, handler) {
     if (!this.handlers.has(event)) this.handlers.set(event, /* @__PURE__ */ new Set());
     this.handlers.get(event).add(handler);
   }
   off(event, handler) {
-    this.handlers.get(event)?.delete(handler);
+    const wrapper = this.onceMap.get(handler);
+    if (wrapper) {
+      this.onceMap.delete(handler);
+      this.handlers.get(event)?.delete(wrapper);
+    } else {
+      this.handlers.get(event)?.delete(handler);
+    }
+  }
+  once(event, handler) {
+    const wrapper = ((...args) => {
+      this.off(event, handler);
+      handler(...args);
+    });
+    this.onceMap.set(handler, wrapper);
+    this.on(event, wrapper);
   }
   emit(event, ...args) {
     this.handlers.get(event)?.forEach((h) => h(...args));
@@ -799,7 +1146,7 @@ async function ytFetch(url) {
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`YouTube Data API error ${res.status}: ${body.slice(0, 200)}`);
+    throw new NetworkError(`YouTube Data API error ${res.status}: ${body.slice(0, 200)}`, res.status);
   }
   return res.json();
 }
@@ -854,7 +1201,7 @@ var YouTubeDataAPISource = class {
     url.searchParams.set("key", this.apiKey);
     const data = await ytFetch(url);
     const item = data.items?.[0];
-    if (!item) throw new Error(`Video not found: ${id}`);
+    if (!item) throw new NotFoundError(`Video not found: ${id}`, id);
     return {
       type: "song",
       videoId: id,
@@ -1111,16 +1458,16 @@ var JioSaavnSource = class {
   async getStream(id, quality = "high") {
     const raw = await this.client.getSong(stripPrefix(id));
     const song = raw.songs?.[0];
-    if (!song) throw new Error(`JioSaavn: song not found \u2014 ${id}`);
+    if (!song) throw new NotFoundError(`JioSaavn: song not found \u2014 ${id}`, id);
     const decrypted = decryptStreamUrl(song.more_info.encrypted_media_url);
     const { suffix, bitrate } = BITRATE[quality];
     const url = decrypted.replace("_96", suffix);
-    return { url, codec: "mp4a", bitrate, expiresAt: extractExpiry(url) };
+    return { url, codec: "mp4a", mimeType: "audio/mp4", bitrate, expiresAt: extractExpiry(url) };
   }
   async getMetadata(id) {
     const raw = await this.client.getSong(stripPrefix(id));
     const song = raw.songs?.[0];
-    if (!song) throw new Error(`JioSaavn: song not found \u2014 ${id}`);
+    if (!song) throw new NotFoundError(`JioSaavn: song not found \u2014 ${id}`, id);
     return { ...mapSong(song), videoId: id.startsWith("jio:") ? id : `jio:${id}` };
   }
   async getAlbum(id) {
@@ -1234,6 +1581,64 @@ var JioSaavnSource = class {
   }
 };
 
+// src/lyrics/lrc-utils.ts
+var WORD_TAG_RE = /<(\d+):(\d+\.\d+)>([^<]*)/g;
+function parseLrc(lrc) {
+  const lines = [];
+  for (const line of lrc.split("\n")) {
+    const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/);
+    if (!match) continue;
+    const raw = match[3].trim();
+    if (!raw) continue;
+    const time = parseInt(match[1], 10) * 60 + parseFloat(match[2]);
+    if (raw.includes("<")) {
+      const words = [];
+      let m;
+      WORD_TAG_RE.lastIndex = 0;
+      while ((m = WORD_TAG_RE.exec(raw)) !== null) {
+        const wordText = m[3].trim();
+        if (wordText) words.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: wordText });
+      }
+      if (words.length > 0) {
+        lines.push({ time, text: words.map((w) => w.text).join(" "), words });
+        continue;
+      }
+    }
+    lines.push({ time, text: raw });
+  }
+  return lines;
+}
+function getActiveLineIndex(lines, currentTime) {
+  if (lines.length === 0) return -1;
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].time <= currentTime) idx = i;
+    else break;
+  }
+  return idx;
+}
+function getActiveLine(lines, currentTime) {
+  const idx = getActiveLineIndex(lines, currentTime);
+  return idx === -1 ? null : lines[idx];
+}
+function formatTimestamp(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  const mm = String(mins).padStart(2, "0");
+  const ss = secs.toFixed(2).padStart(5, "0");
+  return `[${mm}:${ss}]`;
+}
+function offsetLrc(lines, offsetMs) {
+  return lines.map((line) => ({
+    ...line,
+    time: Math.max(0, line.time + offsetMs / 1e3)
+  }));
+}
+function serializeLrc(lines) {
+  if (lines.length === 0) return "";
+  return lines.map((line) => `${formatTimestamp(line.time)} ${line.text}`).join("\n");
+}
+
 // src/lyrics/lrclib.ts
 async function fetchFromLrclib(artist, title) {
   try {
@@ -1251,17 +1656,6 @@ async function fetchFromLrclib(artist, title) {
   } catch {
     return null;
   }
-}
-function parseLrc(lrc) {
-  const lines = [];
-  for (const line of lrc.split("\n")) {
-    const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/);
-    if (!match) continue;
-    const time = parseInt(match[1], 10) * 60 + parseFloat(match[2]);
-    const text = match[3].trim();
-    if (text) lines.push({ time, text });
-  }
-  return lines;
 }
 
 // src/lyrics/lyrics-ovh.ts
@@ -1392,14 +1786,57 @@ function rankSongs(songs) {
   const scored = songs.map((s, i) => {
     const ts = titleScore(s.title) * 0.4;
     const b = buckets[i] ?? mean;
-    const z = Math.abs(b - mean) / stdDev;
-    const ds = Math.max(0, 1 - z / 2) * 0.35;
+    const z2 = Math.abs(b - mean) / stdDev;
+    const ds = Math.max(0, 1 - z2 / 2) * 0.35;
     const as = albumScore(s.album) * 0.15;
     const artistBoost = dominant && s.artist.toLowerCase() === dominant ? 0.1 : 0;
     return { song: s, score: ts + ds + as + artistBoost };
   });
   return scored.sort((a, b) => b.score - a.score).map((s) => s.song);
 }
+
+// src/logger/index.ts
+var LEVELS = {
+  silent: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4
+};
+var Logger = class {
+  constructor(config = {}) {
+    this.level = LEVELS[config.logLevel ?? "warn"];
+    this.handler = config.logHandler;
+  }
+  log(level, message, meta) {
+    if (LEVELS[level] > this.level) return;
+    if (this.handler) {
+      this.handler(level, message, meta);
+      return;
+    }
+    const metaStr = meta ? JSON.stringify(meta) : "";
+    const methods = {
+      silent: "log",
+      error: "error",
+      warn: "warn",
+      info: "info",
+      debug: "debug"
+    };
+    console[methods[level]](`[${level}] ${message}`, metaStr);
+  }
+  error(message, meta) {
+    this.log("error", message, meta);
+  }
+  warn(message, meta) {
+    this.log("warn", message, meta);
+  }
+  info(message, meta) {
+    this.log("info", message, meta);
+  }
+  debug(message, meta) {
+    this.log("debug", message, meta);
+  }
+};
 
 // src/musickit/index.ts
 function makeReq(endpoint) {
@@ -1416,6 +1853,7 @@ var MusicKit = class _MusicKit {
     this._discovery = null;
     this._stream = null;
     this._downloader = null;
+    this._identifier = null;
     this._ytPromise = null;
     this.config = config;
     this.sourceOrder = resolveSourceOrder(config.sourceOrder);
@@ -1426,6 +1864,7 @@ var MusicKit = class _MusicKit {
     });
     this.limiter = new RateLimiter(config.rateLimit ?? {}, config.minRequestGap ?? 100);
     this.emitter = new MusicKitEmitter();
+    this.log = new Logger({ logLevel: config.logLevel, logHandler: config.logHandler });
     this.retry = new RetryEngine({
       maxAttempts: config.maxRetries ?? 3,
       backoffBase: config.backoffBase ?? 1e3,
@@ -1439,12 +1878,14 @@ var MusicKit = class _MusicKit {
     });
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
-      this._stream = new StreamResolver(this.cache, _yt, config.cookiesPath);
+      this._stream = new StreamResolver(this.cache, config.cookiesPath);
       this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath);
     }
     if (!config.youtubeApiKey && !config.cookiesPath) {
-      const log = config.logHandler ?? ((_, msg) => console.warn(msg));
-      log("warn", "[MusicKit] WARNING: No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.");
+      this.log.warn("[MusicKit] No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.");
+    }
+    if (!config.identify?.acoustidApiKey) {
+      this.log.warn("[MusicKit] identify() is unavailable \u2014 no acoustidApiKey set. Get a free key at acoustid.org and pass it as config.identify.acoustidApiKey.");
     }
   }
   static async create(config = {}) {
@@ -1462,11 +1903,11 @@ var MusicKit = class _MusicKit {
     if (override) {
       const targetName = override === "youtube" ? "youtube-music" : "jiosaavn";
       const found = this.sources.find((s) => s.name === targetName);
-      if (!found) throw new Error(`Source '${override}' is not registered \u2014 check your sourceOrder config`);
+      if (!found) throw new ValidationError(`Source '${override}' is not registered \u2014 check your sourceOrder config`, "sourceOrder");
       return found;
     }
     const source = this.sources.find((s) => s.canHandle(query));
-    if (!source) throw new Error(`No source can handle: ${query}`);
+    if (!source) throw new NotFoundError(`No source can handle: ${query}`, query);
     return source;
   }
   async ensureClients() {
@@ -1480,7 +1921,7 @@ var MusicKit = class _MusicKit {
       }
       const yt = await this._ytPromise;
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, yt, this.config.cookiesPath);
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath);
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath);
     }
     if (this.sources.length === 0) {
@@ -1515,6 +1956,9 @@ var MusicKit = class _MusicKit {
   }
   off(event, handler) {
     this.emitter.off(event, handler);
+  }
+  once(event, handler) {
+    this.emitter.once(event, handler);
   }
   async autocomplete(query) {
     const resolved = resolveInput(query);
@@ -1736,6 +2180,14 @@ var MusicKit = class _MusicKit {
     await this.ensureClients();
     return this.call("browse", () => this._discovery.getCharts(options));
   }
+  async getMoodCategories() {
+    await this.ensureClients();
+    return this.call("browse", () => this._discovery.getMoodCategories());
+  }
+  async getMoodPlaylists(params) {
+    await this.ensureClients();
+    return this.call("browse", () => this._discovery.getMoodPlaylists(params));
+  }
   async download(videoId, options) {
     await this.ensureClients();
     let id = resolveInput(videoId);
@@ -1743,7 +2195,7 @@ var MusicKit = class _MusicKit {
       const meta = await this.sourceFor(id).getMetadata(id);
       const ytSongs = await this._discovery.search(`${meta.title} ${meta.artist}`, { filter: "songs" });
       const match = ytSongs.find((s) => s.videoId && !s.videoId.startsWith("jio:"));
-      if (!match?.videoId) throw new Error(`No downloadable YouTube equivalent found for: ${id}`);
+      if (!match?.videoId) throw new NotFoundError(`No downloadable YouTube equivalent found for: ${id}`, id);
       id = match.videoId;
     }
     return this._downloader.download(id, options);
@@ -1754,11 +2206,34 @@ var MusicKit = class _MusicKit {
     if (resolved.startsWith("jio:")) {
       const streamData = await this.call("stream", () => this.sourceFor(resolved).getStream(resolved, "high"));
       const response = await fetch(streamData.url);
-      if (!response.ok) throw new Error(`Stream fetch failed: ${response.status}`);
+      if (!response.ok) throw new NetworkError(`Stream fetch failed: ${response.status}`, response.status);
       const { Readable } = await import("stream");
       return Readable.fromWeb(response.body);
     }
     return this._downloader.streamAudio(resolved);
+  }
+  async identify(filePath) {
+    if (!this.config.identify?.acoustidApiKey) {
+      throw new ValidationError(
+        "identify() requires config.identify.acoustidApiKey \u2014 get a free key at acoustid.org",
+        "identify.acoustidApiKey"
+      );
+    }
+    if (!this._identifier) {
+      this._identifier = new Identifier({
+        acoustidApiKey: this.config.identify.acoustidApiKey,
+        songrecBin: this.config.identify.songrecBin
+      });
+    }
+    let match = await this._identifier.recognizeWithSongrec(filePath);
+    if (!match) {
+      const fp = await this._identifier.fingerprint(filePath);
+      match = await this._identifier.lookup(fp.fingerprint, fp.duration);
+    }
+    if (!match) return null;
+    await this.ensureClients();
+    const songs = await this.search(`${match.artist} ${match.title}`, { filter: "songs" });
+    return songs[0] ?? null;
   }
   async streamPCM(id) {
     await this.ensureClients();
@@ -1781,6 +2256,9 @@ function sanitizeTitle(t) {
 function sanitizeArtist(a) {
   return a.replace(ARTIST_NOISE, "").trim();
 }
+
+// package.json
+var version = "1.0.1";
 
 // src/models/index.ts
 var SearchFilter = {
@@ -1811,19 +2289,44 @@ function getBestThumbnail(thumbnails, targetSize) {
   );
 }
 export {
+  AlbumSchema,
+  ArtistSchema,
   Cache,
   DiscoveryClient,
   Downloader,
   HttpError,
+  Identifier,
   JIOSAAVN_LANGUAGES,
+  Logger,
   MusicKit,
+  MusicKitBaseError,
   MusicKitEmitter,
   MusicKitErrorCode,
+  NetworkError,
+  NonRetryableError,
+  NotFoundError,
+  PlaylistSchema,
+  RateLimitError,
   RateLimiter,
   RetryEngine,
   SearchFilter,
   SessionManager,
+  SongSchema,
+  StreamError,
   StreamResolver,
+  ThumbnailSchema,
+  ValidationError,
+  formatTimestamp,
+  getActiveLine,
+  getActiveLineIndex,
   getBestThumbnail,
-  isStreamExpired
+  isStreamExpired,
+  offsetLrc,
+  parseLrc,
+  safeParseAlbum,
+  safeParseArtist,
+  safeParsePlaylist,
+  safeParseSong,
+  serializeLrc,
+  version
 };

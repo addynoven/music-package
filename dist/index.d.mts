@@ -1,4 +1,5 @@
 import { Innertube } from 'youtubei.js';
+import { z } from 'zod';
 
 interface Thumbnail {
     url: string;
@@ -45,9 +46,14 @@ interface Section {
     title: string;
     items: (Song | Album | Artist | Playlist)[];
 }
+interface LyricWord {
+    time: number;
+    text: string;
+}
 interface LyricLine {
     time: number;
     text: string;
+    words?: LyricWord[];
 }
 interface Lyrics {
     plain: string;
@@ -56,6 +62,7 @@ interface Lyrics {
 interface StreamingData {
     url: string;
     codec: 'opus' | 'mp4a';
+    mimeType: string;
     bitrate: number;
     expiresAt: number;
     loudnessDb?: number;
@@ -88,10 +95,16 @@ interface SearchOptions {
 interface StreamOptions {
     quality?: Quality;
 }
+interface DownloadProgress {
+    percent: number;
+    bytesDownloaded: number;
+    totalBytes?: number;
+    filename: string;
+}
 interface DownloadOptions$1 {
     path?: string;
     format?: DownloadFormat$1;
-    onProgress?: (percent: number) => void;
+    onProgress?: (progress: DownloadProgress) => void;
 }
 interface BrowseOptions {
     country?: string;
@@ -117,7 +130,7 @@ type SourceName = 'jiosaavn' | 'youtube';
 type SourcePreference = 'best' | SourceName[];
 interface MusicKitConfig {
     logLevel?: LogLevel;
-    logHandler?: (level: LogLevel, message: string) => void;
+    logHandler?: (level: LogLevel, message: string, meta?: Record<string, unknown>) => void;
     rateLimit?: RateLimitConfig;
     minRequestGap?: number;
     cache?: CacheConfig;
@@ -132,6 +145,10 @@ interface MusicKitConfig {
     sourceOrder?: SourcePreference;
     cookiesPath?: string;
     youtubeApiKey?: string;
+    identify?: {
+        acoustidApiKey: string;
+        songrecBin?: string;
+    };
 }
 interface MusicKitRequest {
     method: string;
@@ -182,8 +199,10 @@ type EventName$1 = keyof EventMap;
 type Handler<E extends EventName$1> = (...args: EventMap[E]) => void;
 declare class MusicKitEmitter {
     private handlers;
+    private onceMap;
     on<E extends EventName$1>(event: E, handler: Handler<E>): void;
     off<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    once<E extends EventName$1>(event: E, handler: Handler<E>): void;
     emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
 }
 
@@ -214,12 +233,14 @@ declare class MusicKit {
     private readonly retry;
     private readonly session;
     private readonly emitter;
+    private readonly log;
     private readonly searchCache;
     private readonly sourceOrder;
     readonly sources: AudioSource[];
     private _discovery;
     private _stream;
     private _downloader;
+    private _identifier;
     private _ytPromise;
     constructor(config?: MusicKitConfig, _yt?: Innertube);
     static create(config?: MusicKitConfig): Promise<MusicKit>;
@@ -229,6 +250,7 @@ declare class MusicKit {
     private call;
     on(event: EventName, handler: EventHandler<typeof event>): void;
     off(event: EventName, handler: EventHandler<typeof event>): void;
+    once(event: EventName, handler: EventHandler<typeof event>): void;
     autocomplete(query: string): Promise<string[]>;
     search(query: string, options: {
         filter: 'songs';
@@ -276,8 +298,14 @@ declare class MusicKit {
     getMetadata(id: string): Promise<Song>;
     getLyrics(id: string): Promise<Lyrics | null>;
     getCharts(options?: BrowseOptions): Promise<Section[]>;
+    getMoodCategories(): Promise<{
+        title: string;
+        params: string;
+    }[]>;
+    getMoodPlaylists(params: string): Promise<Section[]>;
     download(videoId: string, options?: DownloadOptions$1): Promise<void>;
     streamAudio(id: string): Promise<NodeJS.ReadableStream>;
+    identify(filePath: string): Promise<Song | null>;
     streamPCM(id: string): Promise<NodeJS.ReadableStream>;
 }
 
@@ -296,11 +324,19 @@ declare class Cache {
     };
     private db;
     private readonly enabled;
+    private hits;
+    private misses;
     constructor(options: CacheOptions);
     get<T = unknown>(key: string): T | null;
     set(key: string, value: unknown, ttlSeconds: number): void;
     delete(key: string): void;
     isUrlExpired(url: string): boolean;
+    sweep(): number;
+    getStats(): {
+        hits: number;
+        misses: number;
+        keys: number;
+    };
     close(): void;
 }
 
@@ -310,7 +346,7 @@ declare class RateLimiter {
     private readonly minGapMs;
     private readonly limits;
     constructor(limits?: RateLimitConfig, minGapMs?: number);
-    throttle(endpoint: string, onLimited?: (endpoint: string, waitMs: number) => void): Promise<void>;
+    throttle(endpoint: string, onLimited?: (endpoint: string, waitMs: number) => void, weight?: number): Promise<void>;
     getWaitTime(endpoint: string): number;
     private enforceMinGap;
     private consumeToken;
@@ -318,6 +354,9 @@ declare class RateLimiter {
     private refillIfNeeded;
 }
 
+declare class NonRetryableError extends Error {
+    constructor(message: string);
+}
 declare class HttpError extends Error {
     readonly statusCode: number;
     constructor(statusCode: number, message: string);
@@ -337,6 +376,32 @@ declare class RetryEngine {
     private readonly config;
     constructor(config: RetryEngineConfig);
     execute<T>(fn: () => Promise<T>, _endpoint: string, options?: RetryOptions): Promise<T>;
+}
+
+declare class MusicKitBaseError extends Error {
+    readonly code: string;
+    constructor(message: string, code: string);
+}
+declare class NotFoundError extends MusicKitBaseError {
+    readonly resourceId?: string;
+    constructor(message: string, resourceId?: string);
+}
+declare class RateLimitError extends MusicKitBaseError {
+    readonly retryAfterMs?: number;
+    constructor(message: string, retryAfterMs?: number);
+}
+declare class NetworkError extends MusicKitBaseError {
+    readonly statusCode?: number;
+    readonly cause?: unknown;
+    constructor(message: string, statusCode?: number, cause?: unknown);
+}
+declare class ValidationError extends MusicKitBaseError {
+    readonly field: string;
+    constructor(message: string, field: string);
+}
+declare class StreamError extends MusicKitBaseError {
+    readonly videoId: string;
+    constructor(message: string, videoId: string);
 }
 
 interface SessionOptions {
@@ -368,6 +433,11 @@ declare class DiscoveryClient {
     getPlaylist(playlistId: string): Promise<Playlist>;
     getRadio(videoId: string): Promise<Song[]>;
     getRelated(videoId: string): Promise<Song[]>;
+    getMoodCategories(): Promise<{
+        title: string;
+        params: string;
+    }[]>;
+    getMoodPlaylists(params: string): Promise<Section[]>;
     getCharts(options?: {
         country?: string;
     }): Promise<Section[]>;
@@ -375,9 +445,8 @@ declare class DiscoveryClient {
 
 declare class StreamResolver {
     private readonly cache;
-    readonly yt: Innertube;
     private readonly cookiesPath?;
-    constructor(cache: Cache, yt: Innertube, cookiesPath?: string | undefined);
+    constructor(cache: Cache, cookiesPath?: string | undefined);
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
         quality?: Quality;
@@ -388,7 +457,7 @@ type DownloadFormat = 'opus' | 'm4a';
 interface DownloadOptions {
     path?: string;
     format?: DownloadFormat;
-    onProgress?: (percent: number) => void;
+    onProgress?: (progress: DownloadProgress) => void;
     _mockSong?: Song;
     _mockReadStream?: NodeJS.ReadableStream;
 }
@@ -405,6 +474,46 @@ declare class Downloader {
     private readWithProgress;
 }
 
+interface IdentifyResult {
+    artist: string;
+    title: string;
+    score: number;
+}
+interface IdentifierOptions {
+    acoustidApiKey: string;
+    songrecBin?: string;
+}
+declare class Identifier {
+    private readonly options;
+    constructor(options: IdentifierOptions);
+    lookup(fingerprint: string, duration: number): Promise<IdentifyResult | null>;
+    fingerprint(filePath: string): Promise<{
+        fingerprint: string;
+        duration: number;
+    }>;
+    recognizeWithSongrec(filePath: string): Promise<IdentifyResult | null>;
+    private extractClip;
+    private decodeToPCM;
+    private buildFakeAudioBuffer;
+}
+
+interface LoggerConfig {
+    logLevel?: LogLevel;
+    logHandler?: (level: LogLevel, message: string, meta?: Record<string, unknown>) => void;
+}
+declare class Logger {
+    private readonly level;
+    private readonly handler?;
+    constructor(config?: LoggerConfig);
+    private log;
+    error(message: string, meta?: Record<string, unknown>): void;
+    warn(message: string, meta?: Record<string, unknown>): void;
+    info(message: string, meta?: Record<string, unknown>): void;
+    debug(message: string, meta?: Record<string, unknown>): void;
+}
+
+var version = "1.0.1";
+
 /**
  * Returns the thumbnail whose width is closest to targetSize.
  * Falls back to the first thumbnail when all widths are 0.
@@ -419,4 +528,70 @@ declare function isStreamExpired(stream: StreamingData): boolean;
 
 declare const JIOSAAVN_LANGUAGES: Set<string>;
 
-export { type Album, type Artist, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, Downloader, HttpError, JIOSAAVN_LANGUAGES, type LogLevel, type LyricLine, type Lyrics, type MediaItem, MusicKit, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, type Playlist, type Quality, type RateLimitConfig, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, type SourceName, type SourcePreference, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, getBestThumbnail, isStreamExpired };
+declare function parseLrc(lrc: string): LyricLine[];
+declare function getActiveLineIndex(lines: LyricLine[], currentTime: number): number;
+declare function getActiveLine(lines: LyricLine[], currentTime: number): LyricLine | null;
+declare function formatTimestamp(seconds: number): string;
+declare function offsetLrc(lines: LyricLine[], offsetMs: number): LyricLine[];
+declare function serializeLrc(lines: LyricLine[]): string;
+
+declare const ThumbnailSchema: z.ZodObject<{
+    url: z.ZodString;
+    width: z.ZodNumber;
+    height: z.ZodNumber;
+}, z.core.$strip>;
+declare const SongSchema: z.ZodObject<{
+    type: z.ZodLiteral<"song">;
+    videoId: z.ZodString;
+    title: z.ZodString;
+    artist: z.ZodString;
+    duration: z.ZodNumber;
+    thumbnails: z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+        width: z.ZodNumber;
+        height: z.ZodNumber;
+    }, z.core.$strip>>;
+    album: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+declare const AlbumSchema: z.ZodObject<{
+    type: z.ZodLiteral<"album">;
+    browseId: z.ZodString;
+    title: z.ZodString;
+    artist: z.ZodString;
+    year: z.ZodOptional<z.ZodString>;
+    thumbnails: z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+        width: z.ZodNumber;
+        height: z.ZodNumber;
+    }, z.core.$strip>>;
+    tracks: z.ZodArray<z.ZodAny>;
+}, z.core.$strip>;
+declare const ArtistSchema: z.ZodObject<{
+    type: z.ZodLiteral<"artist">;
+    channelId: z.ZodString;
+    name: z.ZodString;
+    thumbnails: z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+        width: z.ZodNumber;
+        height: z.ZodNumber;
+    }, z.core.$strip>>;
+    songs: z.ZodArray<z.ZodAny>;
+    albums: z.ZodArray<z.ZodAny>;
+    singles: z.ZodArray<z.ZodAny>;
+}, z.core.$strip>;
+declare const PlaylistSchema: z.ZodObject<{
+    type: z.ZodLiteral<"playlist">;
+    playlistId: z.ZodString;
+    title: z.ZodString;
+    thumbnails: z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+        width: z.ZodNumber;
+        height: z.ZodNumber;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+declare function safeParseSong(data: unknown): Song | null;
+declare function safeParseAlbum(data: unknown): Album | null;
+declare function safeParseArtist(data: unknown): Artist | null;
+declare function safeParsePlaylist(data: unknown): Playlist | null;
+
+export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, JIOSAAVN_LANGUAGES, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Quality, type RateLimitConfig, RateLimitError, RateLimiter, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };

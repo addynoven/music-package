@@ -14,6 +14,7 @@ export { SessionManager } from './session'
 export { DiscoveryClient } from './discovery'
 export { StreamResolver } from './stream'
 export { Downloader } from './downloader'
+export { Identifier } from './identifier'
 export { MusicKitEmitter } from './events'
 export { Logger } from './logger'
 
@@ -38,6 +39,8 @@ export {
 } from './schemas'
 
 // Type exports
+export type { IdentifyResult } from './identifier'
+
 export type {
   // Data models
   Song,

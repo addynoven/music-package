@@ -6,6 +6,7 @@ import { SessionManager } from '../session'
 import { DiscoveryClient } from '../discovery'
 import { StreamResolver } from '../stream'
 import { Downloader } from '../downloader'
+import { Identifier } from '../identifier'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
 import { YouTubeDataAPISource } from '../sources/youtube-data-api'
@@ -64,6 +65,7 @@ export class MusicKit {
   private _discovery: DiscoveryClient | null = null
   private _stream: StreamResolver | null = null
   private _downloader: Downloader | null = null
+  private _identifier: Identifier | null = null
   private _ytPromise: Promise<Innertube> | null = null
 
   constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
@@ -96,6 +98,10 @@ export class MusicKit {
 
     if (!config.youtubeApiKey && !config.cookiesPath) {
       this.log.warn('[MusicKit] No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.')
+    }
+
+    if (!config.identify?.acoustidApiKey) {
+      this.log.warn('[MusicKit] identify() is unavailable — no acoustidApiKey set. Get a free key at acoustid.org and pass it as config.identify.acoustidApiKey.')
     }
   }
 
@@ -489,6 +495,34 @@ export class MusicKit {
     }
 
     return this._downloader!.streamAudio(resolved)
+  }
+
+  async identify(filePath: string): Promise<Song | null> {
+    if (!this.config.identify?.acoustidApiKey) {
+      throw new ValidationError(
+        'identify() requires config.identify.acoustidApiKey — get a free key at acoustid.org',
+        'identify.acoustidApiKey',
+      )
+    }
+    if (!this._identifier) {
+      this._identifier = new Identifier({
+        acoustidApiKey: this.config.identify.acoustidApiKey,
+        songrecBin: this.config.identify.songrecBin,
+      })
+    }
+
+    let match = await this._identifier.recognizeWithSongrec(filePath)
+
+    if (!match) {
+      const fp = await this._identifier.fingerprint(filePath)
+      match = await this._identifier.lookup(fp.fingerprint, fp.duration)
+    }
+
+    if (!match) return null
+
+    await this.ensureClients()
+    const songs = await this.search(`${match.artist} ${match.title}`, { filter: 'songs' }) as Song[]
+    return songs[0] ?? null
   }
 
   async streamPCM(id: string): Promise<NodeJS.ReadableStream> {

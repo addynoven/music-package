@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@unimusic/chromaprint':
+        specifier: ^0.1.4
+        version: 0.1.4
       node-forge:
         specifier: ^1.4.0
         version: 1.4.0
@@ -578,6 +581,9 @@ packages:
 
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
+
+  '@unimusic/chromaprint@0.1.4':
+    resolution: {integrity: sha512-li+/NUjgvvPNEcWK1+72pxXT/vtfNpwWW2QNrh9+uccJ7tGT0Lnn0XCx9P+Sjnl9vJ2qa03dQYKV9w/i8o6Yww==}
 
   '@vitest/coverage-v8@3.2.4':
     resolution: {integrity: sha512-EyF9SXU6kS5Ku/U82E259WSnvg6c8KTjppUncuNdm5QHpe17mwREHnjDzozC8x9MZ0xfBUFSaLkRv4TMA75ALQ==}
@@ -1719,6 +1725,8 @@ snapshots:
   '@types/node@22.19.17':
     dependencies:
       undici-types: 6.21.0
+
+  '@unimusic/chromaprint@0.1.4': {}
 
   '@vitest/coverage-v8@3.2.4(vitest@3.2.4(@types/node@22.19.17)(jsdom@25.0.1))':
     dependencies:

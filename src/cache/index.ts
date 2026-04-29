@@ -35,6 +35,7 @@ export class Cache {
         expires_at INTEGER NOT NULL
       )
     `)
+    this.sweep()
   }
 
   get<T = unknown>(key: string): T | null {
@@ -79,6 +80,12 @@ export class Cache {
     } catch {
       return true
     }
+  }
+
+  sweep(): number {
+    if (!this.enabled || !this.db) return 0
+    const result = this.db.prepare('DELETE FROM cache WHERE expires_at < ?').run(Date.now())
+    return result.changes as number
   }
 
   getStats(): { hits: number; misses: number; keys: number } {

@@ -178,4 +178,41 @@ describe('Cache', () => {
       expect(stats.keys).toBe(0)
     })
   })
+
+  // ── sweep ───────────────────────────────────────────────────────────────────
+
+  describe('sweep', () => {
+    it('deletes expired entries and returns count removed', () => {
+      cache.set('live', 'val', 60)
+      cache.set('dead1', 'val', -1)
+      cache.set('dead2', 'val', -1)
+
+      const removed = cache.sweep()
+
+      expect(removed).toBe(2)
+      expect(cache.get('live')).not.toBeNull()
+    })
+
+    it('returns 0 when nothing is expired', () => {
+      cache.set('a', 1, 60)
+      cache.set('b', 2, 60)
+      expect(cache.sweep()).toBe(0)
+    })
+
+    it('returns 0 on empty cache', () => {
+      expect(cache.sweep()).toBe(0)
+    })
+
+    it('returns 0 when cache is disabled', () => {
+      const disabled = new Cache({ enabled: false })
+      expect(disabled.sweep()).toBe(0)
+    })
+
+    it('reduces keys count after sweep', () => {
+      cache.set('a', 1, 60)
+      cache.set('b', 2, -1) // expired
+      cache.sweep()
+      expect(cache.getStats().keys).toBe(1)
+    })
+  })
 })

@@ -15,11 +15,13 @@ function makeProc(overrides: Record<string, any> = {}) {
 // ── module mock ────────────────────────────────────────────────────────────
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }))
+vi.mock('node:stream/promises', () => ({ pipeline: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../../../src/stream', () => ({
   StreamResolver: vi.fn().mockImplementation(() => ({ resolve: vi.fn() })),
 }))
 
 import { spawn } from 'node:child_process'
+import { pipeline } from 'node:stream/promises'
 import { StreamResolver } from '../../../src/stream'
 
 // ── suite ──────────────────────────────────────────────────────────────────
@@ -68,19 +70,18 @@ describe('Downloader.streamPCM', () => {
     expect(args).toContain('pipe:1')   // write to stdout
   })
 
-  it('pipes yt-dlp stdout into ffmpeg stdin', () => {
+  it('connects yt-dlp stdout to ffmpeg stdin via pipeline(), not .pipe()', () => {
     const ytdlp = makeProc()
     const ffmpeg = makeProc()
-    ffmpeg.stdin.pipe = vi.fn()
     ;(spawn as any)
       .mockReturnValueOnce(ytdlp)
       .mockReturnValueOnce(ffmpeg)
 
-    // spy on ytdlp.stdout.pipe
     const pipeSpy = vi.spyOn(ytdlp.stdout, 'pipe')
     downloader.streamPCM('dQw4w9WgXcQ')
 
-    expect(pipeSpy).toHaveBeenCalledWith(ffmpeg.stdin)
+    expect(pipeline).toHaveBeenCalledWith(ytdlp.stdout, ffmpeg.stdin)
+    expect(pipeSpy).not.toHaveBeenCalled()
   })
 
   it('returns the ffmpeg stdout stream', () => {

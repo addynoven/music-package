@@ -14,6 +14,10 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }))
 
+vi.mock('node:stream/promises', () => ({
+  pipeline: vi.fn().mockResolvedValue(undefined),
+}))
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   return { ...actual, createWriteStream: vi.fn() }
@@ -22,6 +26,7 @@ vi.mock('node:fs', async (importOriginal) => {
 import { StreamResolver } from '../../../src/stream'
 import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 
 function makeYtdlpMock(exitCode = 0) {
   const proc = new EventEmitter() as any
@@ -238,6 +243,72 @@ describe('Downloader', () => {
       await expect(
         downloader.download('dQw4w9WgXcQ', { path: tmpDir })
       ).rejects.toThrow('yt-dlp download failed')
+    })
+  })
+
+  // ─── streamPCM ────────────────────────────────────────────────────────────
+
+  describe('streamPCM', () => {
+    function makeStreamProc() {
+      const proc = new EventEmitter() as any
+      const stdout = new EventEmitter() as any
+      stdout.pipe = vi.fn()
+      proc.stdout = stdout
+      proc.stdin = { destroy: vi.fn(), write: vi.fn(), end: vi.fn() }
+      const stderr = new EventEmitter() as any
+      stderr.resume = vi.fn()
+      proc.stderr = stderr
+      return proc
+    }
+
+    it('spawns yt-dlp with the video URL and stdout pipe flag', () => {
+      const ytdlpProc = makeStreamProc()
+      const ffmpegProc = makeStreamProc()
+      vi.mocked(spawn).mockReturnValueOnce(ytdlpProc).mockReturnValueOnce(ffmpegProc)
+
+      downloader.streamPCM('dQw4w9WgXcQ')
+
+      const [cmd, args] = vi.mocked(spawn).mock.calls[0]
+      expect(cmd).toBe('yt-dlp')
+      expect(args).toContain('https://music.youtube.com/watch?v=dQw4w9WgXcQ')
+      const oIdx = args.indexOf('-o')
+      expect(oIdx).toBeGreaterThan(-1)
+      expect(args[oIdx + 1]).toBe('-')
+    })
+
+    it('spawns ffmpeg with 48 kHz stereo s16le PCM output args', () => {
+      const ytdlpProc = makeStreamProc()
+      const ffmpegProc = makeStreamProc()
+      vi.mocked(spawn).mockReturnValueOnce(ytdlpProc).mockReturnValueOnce(ffmpegProc)
+
+      downloader.streamPCM('dQw4w9WgXcQ')
+
+      const [cmd, args] = vi.mocked(spawn).mock.calls[1]
+      expect(cmd).toBe('ffmpeg')
+      expect(args[args.indexOf('-f') + 1]).toBe('s16le')
+      expect(args[args.indexOf('-ar') + 1]).toBe('48000')
+      expect(args[args.indexOf('-ac') + 1]).toBe('2')
+    })
+
+    it('returns ffmpeg stdout as the readable PCM stream', () => {
+      const ytdlpProc = makeStreamProc()
+      const ffmpegProc = makeStreamProc()
+      vi.mocked(spawn).mockReturnValueOnce(ytdlpProc).mockReturnValueOnce(ffmpegProc)
+
+      const result = downloader.streamPCM('dQw4w9WgXcQ')
+
+      expect(result).toBe(ffmpegProc.stdout)
+    })
+
+    it('connects yt-dlp stdout to ffmpeg stdin via pipeline(), not .pipe()', () => {
+      const ytdlpProc = makeStreamProc()
+      const ffmpegProc = makeStreamProc()
+      vi.mocked(spawn).mockReturnValueOnce(ytdlpProc).mockReturnValueOnce(ffmpegProc)
+
+      downloader.streamPCM('dQw4w9WgXcQ')
+
+      expect(pipeline).toHaveBeenCalledWith(ytdlpProc.stdout, ffmpegProc.stdin)
+      expect(ytdlpProc.stdout.pipe).not.toHaveBeenCalled()
     })
   })
 })

@@ -1,6 +1,7 @@
 import { createWriteStream } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { pipeline } from 'node:stream/promises'
 import { StreamResolver } from '../stream'
 import { NetworkError } from '../errors'
 import { parseYtdlpProgress } from './ytdlp-progress'
@@ -119,8 +120,7 @@ export class Downloader {
     ])
     ytdlp.stderr.resume()
     ffmpeg.stderr.resume()
-    ytdlp.stdout.pipe(ffmpeg.stdin)
-    ytdlp.on('error', (err: Error) => ffmpeg.stdin.destroy(err))
+    pipeline(ytdlp.stdout, ffmpeg.stdin).catch(() => {})
     return ffmpeg.stdout
   }
 

@@ -1,14 +1,31 @@
-import type { LyricLine } from '../models'
+import type { LyricLine, LyricWord } from '../models'
+
+const WORD_TAG_RE = /<(\d+):(\d+\.\d+)>([^<]*)/g
 
 export function parseLrc(lrc: string): LyricLine[] {
   const lines: LyricLine[] = []
   for (const line of lrc.split('\n')) {
     const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/)
     if (!match) continue
-    const text = match[3].trim()
-    if (!text) continue
+    const raw = match[3].trim()
+    if (!raw) continue
     const time = parseInt(match[1], 10) * 60 + parseFloat(match[2])
-    lines.push({ time, text })
+
+    if (raw.includes('<')) {
+      const words: LyricWord[] = []
+      let m: RegExpExecArray | null
+      WORD_TAG_RE.lastIndex = 0
+      while ((m = WORD_TAG_RE.exec(raw)) !== null) {
+        const wordText = m[3].trim()
+        if (wordText) words.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: wordText })
+      }
+      if (words.length > 0) {
+        lines.push({ time, text: words.map(w => w.text).join(' '), words })
+        continue
+      }
+    }
+
+    lines.push({ time, text: raw })
   }
   return lines
 }

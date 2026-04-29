@@ -52,6 +52,7 @@ export type {
   SearchResults,
   Lyrics,
   LyricLine,
+  LyricWord,
 
   // Options & config
   SearchOptions,

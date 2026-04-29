@@ -202,3 +202,45 @@ describe('serializeLrc', () => {
     expect(lrc).toContain('One minute')
   })
 })
+
+// ── parseLrc — enhanced word-level timestamps ─────────────────────────────────
+
+describe('parseLrc — enhanced word-level timestamps', () => {
+  const ENHANCED = [
+    '[00:12.00]<00:12.00>Never <00:12.50>gonna <00:13.00>give <00:13.50>you <00:14.00>up',
+    '[00:15.00]<00:15.00>Never <00:15.50>gonna <00:16.00>let <00:16.50>you <00:17.00>down',
+  ].join('\n')
+
+  it('strips <> tags from text — plain text is clean', () => {
+    const lines = parseLrc(ENHANCED)
+    expect(lines[0].text).toBe('Never gonna give you up')
+    expect(lines[1].text).toBe('Never gonna let you down')
+  })
+
+  it('populates words[] with per-word timestamps', () => {
+    const lines = parseLrc(ENHANCED)
+    expect(lines[0].words).toBeDefined()
+    expect(lines[0].words).toHaveLength(5)
+  })
+
+  it('each word has correct time and text', () => {
+    const lines = parseLrc(ENHANCED)
+    expect(lines[0].words![0]).toEqual({ time: 12.0, text: 'Never' })
+    expect(lines[0].words![1]).toEqual({ time: 12.5, text: 'gonna' })
+    expect(lines[0].words![4]).toEqual({ time: 14.0, text: 'up' })
+  })
+
+  it('standard lines without <> tags have no words field', () => {
+    const lines = parseLrc('[00:10.00] Just a normal line')
+    expect(lines[0].words).toBeUndefined()
+  })
+
+  it('mixed file: enhanced and standard lines both parse correctly', () => {
+    const mixed = '[00:10.00] Normal line\n[00:12.00]<00:12.00>Word <00:12.50>level'
+    const lines = parseLrc(mixed)
+    expect(lines).toHaveLength(2)
+    expect(lines[0].words).toBeUndefined()
+    expect(lines[1].words).toHaveLength(2)
+    expect(lines[1].text).toBe('Word level')
+  })
+})

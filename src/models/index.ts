@@ -49,9 +49,15 @@ export interface Section {
   items: (Song | Album | Artist | Playlist)[]
 }
 
+export interface LyricWord {
+  time: number
+  text: string
+}
+
 export interface LyricLine {
   time: number  // seconds (e.g. 17.73)
   text: string
+  words?: LyricWord[]  // present only when enhanced LRC word-level timestamps exist
 }
 
 export interface Lyrics {

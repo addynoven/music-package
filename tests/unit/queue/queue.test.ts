@@ -100,6 +100,45 @@ describe('Queue — basics', () => {
     q.remove(1)
     expect(q.upcoming).toEqual([s1, s3])
   })
+
+  it('move() moves a track from one index to another', () => {
+    q.add(s1); q.add(s2); q.add(s3); q.add(s4)
+    q.move(0, 2)
+    expect(q.upcoming).toEqual([s2, s3, s1, s4])
+  })
+
+  it('move() to index 0 puts track at front', () => {
+    q.add(s1); q.add(s2); q.add(s3)
+    q.move(2, 0)
+    expect(q.upcoming).toEqual([s3, s1, s2])
+  })
+
+  it('move() with same from and to is a no-op', () => {
+    q.add(s1); q.add(s2); q.add(s3)
+    q.move(1, 1)
+    expect(q.upcoming).toEqual([s1, s2, s3])
+  })
+
+  it('skipTo() discards tracks before the given index and sets it as next', () => {
+    q.add(s1); q.add(s2); q.add(s3); q.add(s4)
+    q.skipTo(2)
+    expect(q.upcoming).toEqual([s3, s4])
+  })
+
+  it('skipTo(0) keeps the full queue', () => {
+    q.add(s1); q.add(s2); q.add(s3)
+    q.skipTo(0)
+    expect(q.upcoming).toEqual([s1, s2, s3])
+  })
+
+  it('skipTo() does not affect current or history', () => {
+    q.add(s1); q.add(s2); q.add(s3)
+    q.next()
+    q.skipTo(1)
+    expect(q.current).toEqual(s1)
+    expect(q.history).toEqual([])
+    expect(q.upcoming).toEqual([s3])
+  })
 })
 
 describe('Queue — repeat modes', () => {

@@ -59,6 +59,16 @@ export class Queue<T extends Song = Song> {
     this._upcoming.splice(index, 1)
   }
 
+  move(from: number, to: number): void {
+    if (from === to) return
+    const [track] = this._upcoming.splice(from, 1)
+    this._upcoming.splice(to, 0, track)
+  }
+
+  skipTo(index: number): void {
+    this._upcoming = this._upcoming.slice(index)
+  }
+
   shuffle(): void {
     for (let i = this._upcoming.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))

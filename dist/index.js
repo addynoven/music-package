@@ -338,10 +338,11 @@ var SessionManager = class {
 
 // src/errors/index.ts
 var MusicKitBaseError = class extends Error {
-  constructor(message, code) {
+  constructor(message, code, cause) {
     super(message);
     this.name = "MusicKitBaseError";
     this.code = code;
+    if (cause !== void 0) this.cause = cause;
     if (Error.captureStackTrace) Error.captureStackTrace(this, this.constructor);
   }
 };
@@ -361,10 +362,9 @@ var RateLimitError = class extends MusicKitBaseError {
 };
 var NetworkError = class extends MusicKitBaseError {
   constructor(message, statusCode, cause) {
-    super(message, "NETWORK_ERROR");
+    super(message, "NETWORK_ERROR", cause);
     this.name = "NetworkError";
     this.statusCode = statusCode;
-    this.cause = cause;
   }
 };
 var ValidationError = class extends MusicKitBaseError {
@@ -375,8 +375,8 @@ var ValidationError = class extends MusicKitBaseError {
   }
 };
 var StreamError = class extends MusicKitBaseError {
-  constructor(message, videoId) {
-    super(message, "STREAM_ERROR");
+  constructor(message, videoId, cause) {
+    super(message, "STREAM_ERROR", cause);
     this.name = "StreamError";
     this.videoId = videoId;
   }

@@ -1,6 +1,37 @@
 import { Innertube } from 'youtubei.js';
 import { z } from 'zod';
 
+type EventMap = {
+    beforeRequest: [req: {
+        method: string;
+        endpoint: string;
+        headers: Record<string, string>;
+        body: unknown;
+    }];
+    afterRequest: [req: {
+        method: string;
+        endpoint: string;
+        headers: Record<string, string>;
+        body: unknown;
+    }, durationMs: number, status: number];
+    cacheHit: [key: string, ttlRemaining: number];
+    cacheMiss: [key: string];
+    rateLimited: [endpoint: string, waitMs: number];
+    visitorIdRefreshed: [oldId: string, newId: string];
+    retry: [endpoint: string, attempt: number, reason: string];
+    error: [error: Error];
+};
+type EventName$1 = keyof EventMap;
+type Handler<E extends EventName$1> = (...args: EventMap[E]) => void;
+declare class MusicKitEmitter {
+    private handlers;
+    private onceMap;
+    on<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    off<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    once<E extends EventName$1>(event: E, handler: Handler<E>): void;
+    emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
+}
+
 interface Thumbnail {
     url: string;
     width: number;
@@ -200,37 +231,6 @@ interface Podcast {
     episodes: PodcastEpisode[];
 }
 
-type EventMap = {
-    beforeRequest: [req: {
-        method: string;
-        endpoint: string;
-        headers: Record<string, string>;
-        body: unknown;
-    }];
-    afterRequest: [req: {
-        method: string;
-        endpoint: string;
-        headers: Record<string, string>;
-        body: unknown;
-    }, durationMs: number, status: number];
-    cacheHit: [key: string, ttlRemaining: number];
-    cacheMiss: [key: string];
-    rateLimited: [endpoint: string, waitMs: number];
-    visitorIdRefreshed: [oldId: string, newId: string];
-    retry: [endpoint: string, attempt: number, reason: string];
-    error: [error: Error];
-};
-type EventName$1 = keyof EventMap;
-type Handler<E extends EventName$1> = (...args: EventMap[E]) => void;
-declare class MusicKitEmitter {
-    private handlers;
-    private onceMap;
-    on<E extends EventName$1>(event: E, handler: Handler<E>): void;
-    off<E extends EventName$1>(event: E, handler: Handler<E>): void;
-    once<E extends EventName$1>(event: E, handler: Handler<E>): void;
-    emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
-}
-
 interface AudioSource {
     readonly name: string;
     canHandle(query: string): boolean;
@@ -407,7 +407,7 @@ declare class RetryEngine {
 
 declare class MusicKitBaseError extends Error {
     readonly code: string;
-    constructor(message: string, code: string);
+    constructor(message: string, code: string, cause?: unknown);
 }
 declare class NotFoundError extends MusicKitBaseError {
     readonly resourceId?: string;
@@ -419,7 +419,6 @@ declare class RateLimitError extends MusicKitBaseError {
 }
 declare class NetworkError extends MusicKitBaseError {
     readonly statusCode?: number;
-    readonly cause?: unknown;
     constructor(message: string, statusCode?: number, cause?: unknown);
 }
 declare class ValidationError extends MusicKitBaseError {
@@ -428,7 +427,7 @@ declare class ValidationError extends MusicKitBaseError {
 }
 declare class StreamError extends MusicKitBaseError {
     readonly videoId: string;
-    constructor(message: string, videoId: string);
+    constructor(message: string, videoId: string, cause?: unknown);
 }
 
 interface SessionOptions {

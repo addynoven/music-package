@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MusicKit } from '../../../src/musickit'
-import { makeStreamingData, makeExpiredStreamingData } from '../../helpers/mock-factory'
+import { makeStreamingData } from '../../helpers/mock-factory'
 
 vi.mock('youtubei.js', () => ({ Innertube: { create: vi.fn().mockResolvedValue({}) } }))
 vi.mock('youtubei.js/agnostic', () => ({ Platform: { shim: null, load: vi.fn() } }))
@@ -13,6 +13,7 @@ vi.mock('../../../src/session')
 
 import { RetryEngine } from '../../../src/retry'
 import { DiscoveryClient } from '../../../src/discovery'
+import { StreamResolver } from '../../../src/stream'
 import { Cache } from '../../../src/cache'
 
 ;(RetryEngine as any).mockImplementation(() => ({
@@ -26,8 +27,6 @@ import { Cache } from '../../../src/cache'
 }))
 
 const freshStream = makeStreamingData({ codec: 'mp4a' })
-const expiredStream = makeExpiredStreamingData()
-
 let mockCacheStore: Map<string, any>
 
 ;(Cache as any).mockImplementation(() => {
@@ -40,45 +39,34 @@ let mockCacheStore: Map<string, any>
   }
 })
 
-const mockJioSaavnSource = {
-  name: 'jiosaavn',
-  canHandle: vi.fn((q: string) => q.startsWith('jio:')),
+const mockYTSource = {
+  name: 'youtube-music',
+  canHandle: vi.fn(() => true),
   search: vi.fn(),
   getStream: vi.fn().mockResolvedValue(freshStream),
   getMetadata: vi.fn(),
 }
 
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => mockJioSaavnSource),
+vi.mock('../../../src/sources/youtube-music', () => ({
+  YouTubeMusicSource: vi.fn().mockImplementation(() => mockYTSource),
 }))
+
+;(StreamResolver as any).mockImplementation(() => ({}))
 
 afterEach(() => vi.useRealTimers())
 beforeEach(() => vi.clearAllMocks())
 
-describe('MusicKit — stream cache with auto-refresh', () => {
-  it('caches jio: stream after first fetch', async () => {
+describe('MusicKit — getStream', () => {
+  it('calls YouTube source getStream for a video ID', async () => {
     const mk = new MusicKit()
-    await mk.getStream('jio:abc123')
-    await mk.getStream('jio:abc123')
-    expect(mockJioSaavnSource.getStream).toHaveBeenCalledTimes(1)
-  })
-
-  it('re-fetches jio: stream when cached stream is expired', async () => {
-    const mk = new MusicKit()
-    // First call: caches the stream
-    await mk.getStream('jio:abc123')
-    // Manually put an expired stream in cache
-    mockCacheStore.set('stream:jio:abc123:high', expiredStream)
-    // Second call: should detect expiry and re-fetch
-    await mk.getStream('jio:abc123')
-    expect(mockJioSaavnSource.getStream).toHaveBeenCalledTimes(2)
-  })
-
-  it('returns fresh stream data after re-fetch', async () => {
-    const mk = new MusicKit()
-    mockCacheStore.set('stream:jio:abc123:high', expiredStream)
-    const result = await mk.getStream('jio:abc123')
+    const result = await mk.getStream('dQw4w9WgXcQ')
+    expect(mockYTSource.getStream).toHaveBeenCalledWith('dQw4w9WgXcQ', 'high')
     expect(result.codec).toBe('mp4a')
-    expect(result.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000))
+  })
+
+  it('resolves YouTube URL before fetching stream', async () => {
+    const mk = new MusicKit()
+    await mk.getStream('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+    expect(mockYTSource.getStream).toHaveBeenCalledWith('dQw4w9WgXcQ', 'high')
   })
 })

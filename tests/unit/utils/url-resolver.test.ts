@@ -8,44 +8,8 @@ describe('resolveInput', () => {
     expect(resolveInput('bohemian rhapsody')).toBe('bohemian rhapsody')
   })
 
-  it('returns jio: prefixed ID unchanged', () => {
-    expect(resolveInput('jio:OQMaey5hbVc')).toBe('jio:OQMaey5hbVc')
-  })
-
   it('returns plain YouTube video ID unchanged', () => {
     expect(resolveInput('fJ9rUzIMcZQ')).toBe('fJ9rUzIMcZQ')
-  })
-
-  // ─── JioSaavn URLs ─────────────────────────────────────────────────────────
-
-  it('resolves JioSaavn song URL to jio: prefixed ID', () => {
-    expect(resolveInput('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc'))
-      .toBe('jio:OQMaey5hbVc')
-  })
-
-  it('resolves JioSaavn song URL without www', () => {
-    expect(resolveInput('https://jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc'))
-      .toBe('jio:OQMaey5hbVc')
-  })
-
-  it('resolves JioSaavn album URL to jio: prefixed ID', () => {
-    expect(resolveInput('https://www.jiosaavn.com/album/aashiqui-2/abc123def'))
-      .toBe('jio:abc123def')
-  })
-
-  it('resolves JioSaavn artist URL to jio: prefixed ID', () => {
-    expect(resolveInput('https://www.jiosaavn.com/artist/arijit-singh/LlRWpno5YUs_'))
-      .toBe('jio:LlRWpno5YUs_')
-  })
-
-  it('resolves JioSaavn featured playlist URL to jio: prefixed ID', () => {
-    expect(resolveInput('https://www.jiosaavn.com/featured/bollywood-top-50/abc456xyz'))
-      .toBe('jio:abc456xyz')
-  })
-
-  it('resolves short-form JioSaavn song URL (/s/song/ID)', () => {
-    expect(resolveInput('https://www.jiosaavn.com/s/song/OQMaey5hbVc'))
-      .toBe('jio:OQMaey5hbVc')
   })
 
   // ─── YouTube URLs ──────────────────────────────────────────────────────────
@@ -109,7 +73,22 @@ describe('resolveInput', () => {
     expect(resolveInput(url)).toBe(url)
   })
 
+  it('returns jiosaavn.com URLs unchanged (no longer resolved)', () => {
+    const url = 'https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc'
+    expect(resolveInput(url)).toBe(url)
+  })
+
   it('returns empty string unchanged', () => {
     expect(resolveInput('')).toBe('')
+  })
+
+  it('returns music.youtube.com URL with unrecognised path unchanged', () => {
+    const url = 'https://music.youtube.com/home'
+    expect(resolveInput(url)).toBe(url)
+  })
+
+  it('returns youtu.be URL with no video path unchanged', () => {
+    const url = 'https://youtu.be/'
+    expect(resolveInput(url)).toBe(url)
   })
 })

@@ -29,16 +29,6 @@ const mockDiscovery = {
 
 ;(DiscoveryClient as any).mockImplementation(() => mockDiscovery)
 
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: class {
-    readonly name = 'jiosaavn'
-    canHandle(q: string) { return q.startsWith('jio:') }
-    async search() { return { songs: [], albums: [], artists: [], playlists: [] } }
-    async getStream() { throw new Error('not handled') }
-    async getMetadata() { throw new Error('not handled') }
-    async getPlaylist() { throw new Error('jio playlist') }
-  },
-}))
 
 beforeEach(() => vi.clearAllMocks())
 

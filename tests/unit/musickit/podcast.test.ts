@@ -9,13 +9,6 @@ vi.mock('../../../src/cache')
 vi.mock('../../../src/rate-limiter')
 vi.mock('../../../src/retry')
 vi.mock('../../../src/session')
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => ({
-    name: 'jiosaavn',
-    canHandle: vi.fn(() => false),
-  })),
-  JIOSAAVN_LANGUAGES: new Set(),
-}))
 
 import { RetryEngine } from '../../../src/retry'
 import { Cache } from '../../../src/cache'

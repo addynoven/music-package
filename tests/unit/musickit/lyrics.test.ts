@@ -38,23 +38,13 @@ const mockLyricsOvh = vi.mocked(fetchFromLyricsOvh)
   close: vi.fn(),
 }))
 
-const mockMeta = { type: 'song', videoId: 'jio:abc123', title: 'Tum Hi Ho', artist: 'Arijit Singh', duration: 262, thumbnails: [] }
+const mockMeta = { type: 'song', videoId: 'dQw4w9WgXcQ', title: 'Tum Hi Ho', artist: 'Arijit Singh', duration: 262, thumbnails: [] }
 
 ;(DiscoveryClient as any).mockImplementation(() => ({
   autocomplete: vi.fn().mockResolvedValue([]),
   search: vi.fn().mockResolvedValue({ songs: [], albums: [], artists: [], playlists: [] }),
   getHome: vi.fn().mockResolvedValue([]),
-}))
-
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => ({
-    name: 'jiosaavn',
-    canHandle: vi.fn((q: string) => q.startsWith('jio:') || !/youtube|youtu\.be|^[A-Za-z0-9_-]{11}$/.test(q)),
-    search: vi.fn(),
-    getStream: vi.fn(),
-    getMetadata: vi.fn().mockResolvedValue(mockMeta),
-  })),
-  JIOSAAVN_LANGUAGES: [],
+  getInfo: vi.fn().mockResolvedValue(mockMeta),
 }))
 
 beforeEach(() => vi.clearAllMocks())
@@ -68,14 +58,14 @@ describe('MusicKit — getLyrics', () => {
   it('returns Lyrics object with plain and synced when LRCLIB responds', async () => {
     mockLrclib.mockResolvedValue(MOCK_LYRICS)
     const mk = new MusicKit()
-    const lyrics = await mk.getLyrics('jio:abc123')
+    const lyrics = await mk.getLyrics('dQw4w9WgXcQ')
     expect(lyrics).toEqual(MOCK_LYRICS)
   })
 
   it('calls LRCLIB with sanitised title and artist from metadata', async () => {
     mockLrclib.mockResolvedValue(MOCK_LYRICS)
     const mk = new MusicKit()
-    await mk.getLyrics('jio:abc123')
+    await mk.getLyrics('dQw4w9WgXcQ')
     expect(mockLrclib).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho')
   })
 
@@ -83,7 +73,7 @@ describe('MusicKit — getLyrics', () => {
     mockLrclib.mockResolvedValue(null)
     mockLyricsOvh.mockResolvedValue({ plain: 'fallback lyrics', synced: null })
     const mk = new MusicKit()
-    const lyrics = await mk.getLyrics('jio:abc123')
+    const lyrics = await mk.getLyrics('dQw4w9WgXcQ')
     expect(mockLyricsOvh).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho')
     expect(lyrics).toEqual({ plain: 'fallback lyrics', synced: null })
   })
@@ -92,14 +82,14 @@ describe('MusicKit — getLyrics', () => {
     mockLrclib.mockResolvedValue(null)
     mockLyricsOvh.mockResolvedValue(null)
     const mk = new MusicKit()
-    const lyrics = await mk.getLyrics('jio:abc123')
+    const lyrics = await mk.getLyrics('dQw4w9WgXcQ')
     expect(lyrics).toBeNull()
   })
 
   it('does not call lyrics.ovh when LRCLIB succeeds', async () => {
     mockLrclib.mockResolvedValue(MOCK_LYRICS)
     const mk = new MusicKit()
-    await mk.getLyrics('jio:abc123')
+    await mk.getLyrics('dQw4w9WgXcQ')
     expect(mockLyricsOvh).not.toHaveBeenCalled()
   })
 })

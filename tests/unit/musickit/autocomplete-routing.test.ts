@@ -9,15 +9,6 @@ vi.mock('../../../src/cache')
 vi.mock('../../../src/rate-limiter')
 vi.mock('../../../src/retry')
 vi.mock('../../../src/session')
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: class {
-    readonly name = 'jiosaavn'
-    canHandle(q: string) { return q.startsWith('jio:') }
-    async search() { return { songs: [], albums: [], artists: [], playlists: [] } }
-    async getStream() { throw new Error('not handled') }
-    async getMetadata() { throw new Error('not handled') }
-  },
-}))
 
 import { DiscoveryClient } from '../../../src/discovery'
 import { RetryEngine } from '../../../src/retry'
@@ -41,13 +32,6 @@ describe('MusicKit — autocomplete routing', () => {
     const mk = new MusicKit()
     await mk.autocomplete('queen')
     expect(mockDiscovery.autocomplete).toHaveBeenCalledWith('queen')
-  })
-
-  it('returns empty array for jio: prefixed input (not meaningful for autocomplete)', async () => {
-    const mk = new MusicKit()
-    const result = await mk.autocomplete('jio:abc123')
-    expect(result).toEqual([])
-    expect(mockDiscovery.autocomplete).not.toHaveBeenCalled()
   })
 
   it('returns suggestions from DiscoveryClient for plain text', async () => {

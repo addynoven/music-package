@@ -28,7 +28,6 @@ export { getBestThumbnail } from './utils/thumbnails'
 export { isStreamExpired } from './utils/stream-utils'
 export { resolveInput, resolveSpotifyUrl } from './utils/url-resolver'
 export { PodcastClient } from './podcast'
-export { JIOSAAVN_LANGUAGES } from './sources/jiosaavn'
 export { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp, offsetLrc, serializeLrc } from './lyrics/lrc-utils'
 export {
   ThumbnailSchema,

@@ -18,6 +18,8 @@ export default defineConfig({
         'src/index.ts',
         'src/models/index.ts',
         'src/session/fetcher.ts',
+        'src/sources/audio-source.ts',  // pure interface — nothing to test
+        'src/sources/index.ts',         // barrel re-export only
       ],
       thresholds: {
         branches: 75,

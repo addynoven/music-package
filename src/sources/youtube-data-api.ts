@@ -51,8 +51,8 @@ export class YouTubeDataAPISource implements AudioSource {
     private readonly resolver: StreamResolver,
   ) {}
 
-  canHandle(query: string): boolean {
-    return !query.startsWith('jio:')
+  canHandle(_query: string): boolean {
+    return true
   }
 
   async search(

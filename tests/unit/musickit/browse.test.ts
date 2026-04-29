@@ -10,16 +10,6 @@ vi.mock('../../../src/cache')
 vi.mock('../../../src/rate-limiter')
 vi.mock('../../../src/retry')
 vi.mock('../../../src/session')
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => ({
-    name: 'jiosaavn',
-    canHandle: vi.fn().mockReturnValue(false),
-    search: vi.fn(),
-    getStream: vi.fn(),
-    getMetadata: vi.fn(),
-    // no getHome — lets getHome() tests fall through to YouTube DiscoveryClient
-  })),
-}))
 
 import { DiscoveryClient } from '../../../src/discovery'
 import { RetryEngine } from '../../../src/retry'

@@ -25,15 +25,6 @@ import { DiscoveryClient } from '../../../src/discovery'
   getHome: vi.fn().mockResolvedValue([]),
 }))
 
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => ({
-    name: 'jiosaavn',
-    canHandle: vi.fn(() => false),
-    search: vi.fn(),
-    getStream: vi.fn(),
-    getMetadata: vi.fn(),
-  })),
-}))
 vi.mock('../../../src/sources/youtube-music', () => ({
   YouTubeMusicSource: vi.fn().mockImplementation(() => ({
     name: 'youtube-music',

@@ -1,4 +1,3 @@
-const JIOSAAVN_RE = /^https?:\/\/(?:www\.)?jiosaavn\.com\//
 const YOUTUBE_WATCH_RE = /^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?|youtu\.be\/)(.+)/
 const YTM_BASE = 'music.youtube.com'
 const SPOTIFY_TRACK_RE = /^https?:\/\/open\.spotify\.com\/track\//
@@ -7,7 +6,6 @@ const TITLE_RE = /<title[^>]*>([^<]+)<\/title>/i
 /**
  * Resolves any URL to the canonical ID or query string the source pipeline expects.
  *
- * JioSaavn song/album/artist/playlist URL  → "jio:{id}"
  * youtube.com/watch?v=ID, youtu.be/ID       → "ID"
  * music.youtube.com/watch?v=ID              → "ID"
  * music.youtube.com/browse/BROWSE_ID        → "BROWSE_ID"
@@ -18,9 +16,6 @@ const TITLE_RE = /<title[^>]*>([^<]+)<\/title>/i
 export function resolveInput(input: string): string {
   if (!input) return input
 
-  const jio = resolveJioSaavnUrl(input)
-  if (jio !== null) return jio
-
   const yt = resolveYouTubeUrl(input)
   if (yt !== null) return yt
 
@@ -28,23 +23,6 @@ export function resolveInput(input: string): string {
   if (ytm !== null) return ytm
 
   return input
-}
-
-function resolveJioSaavnUrl(input: string): string | null {
-  if (!JIOSAAVN_RE.test(input)) return null
-
-  try {
-    const url = new URL(input)
-    const segments = url.pathname.split('/').filter(Boolean)
-    if (segments.length === 0) return null
-
-    const id = segments[segments.length - 1]
-    if (!id) return null
-
-    return `jio:${id}`
-  } catch {
-    return null
-  }
 }
 
 function resolveYouTubeUrl(input: string): string | null {

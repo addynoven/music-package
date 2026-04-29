@@ -149,7 +149,7 @@ export interface CacheConfig {
   ttl?: CacheTTLConfig
 }
 
-export type SourceName = 'jiosaavn' | 'youtube'
+export type SourceName = 'youtube'
 export type SourcePreference = 'best' | SourceName[]
 
 export interface MusicKitConfig {

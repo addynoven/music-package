@@ -34,7 +34,6 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 - **Charts** — country-specific top charts
 - **Mood / genre playlists** — browse YouTube Music mood categories
 - **Home feed** — personalized sections ("Trending", "New Releases", "Top Picks", etc.)
-- **Featured playlists** — curated playlists by language and region
 
 **Streaming**
 - **Playable stream URLs** — pre-signed, cached ~6 hours, auto-refreshed
@@ -176,7 +175,7 @@ const playlists = await mk.search('rock classics', { filter: 'playlists' })     
 
 // Limit + source override
 const top5 = await mk.search('shakira', { filter: 'songs', limit: 5 })
-const alt  = await mk.search('tum hi ho', { filter: 'songs', source: 'jiosaavn' })  // explicit source
+const top5 = await mk.search('shakira', { filter: 'songs', limit: 5 })
 
 // Spotify URL → search query → results
 import { resolveSpotifyUrl } from 'musicstream-sdk'
@@ -266,8 +265,6 @@ for (const section of home) {
   console.log(section.items)  // (Song | Album | Playlist)[]
 }
 
-// Featured playlists
-const playlists = await mk.getFeaturedPlaylists({ language: 'fr' })
 
 // Artist / album / playlist pages
 const artist   = await mk.getArtist(channelId)   // songs · albums · singles
@@ -430,7 +427,7 @@ const mk = new MusicKit({
   location: 'IN',
 
   // Source routing
-  sourceOrder: 'best',  // default — or ['jiosaavn', 'youtube'] to customise
+  sourceOrder: 'best',  // default
 
   // Audio identification
   identify: {

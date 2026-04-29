@@ -10,15 +10,6 @@ vi.mock('../../../src/cache')
 vi.mock('../../../src/rate-limiter')
 vi.mock('../../../src/retry')
 vi.mock('../../../src/session')
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: class {
-    readonly name = 'jiosaavn'
-    canHandle() { return false }
-    async search() { return { songs: [], albums: [], artists: [], playlists: [] } }
-    async getStream() { throw new Error('not handled') }
-    async getMetadata() { throw new Error('not handled') }
-  },
-}))
 
 import { DiscoveryClient } from '../../../src/discovery'
 import { StreamResolver } from '../../../src/stream'

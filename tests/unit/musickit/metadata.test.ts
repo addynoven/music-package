@@ -27,18 +27,6 @@ const mockDiscovery = {
 
 ;(DiscoveryClient as any).mockImplementation(() => mockDiscovery)
 
-const mockJioSaavnSource = {
-  name: 'jiosaavn',
-  canHandle: vi.fn((q: string) => q.startsWith('jio:')),
-  search: vi.fn(),
-  getStream: vi.fn(),
-  getMetadata: vi.fn().mockResolvedValue(makeSong({ videoId: 'jio:abc123', title: 'Tum Hi Ho' })),
-}
-
-vi.mock('../../../src/sources/jiosaavn', () => ({
-  JioSaavnSource: vi.fn().mockImplementation(() => mockJioSaavnSource),
-}))
-
 beforeEach(() => vi.clearAllMocks())
 
 describe('MusicKit — getMetadata', () => {
@@ -55,21 +43,9 @@ describe('MusicKit — getMetadata', () => {
     expect(mockDiscovery.getInfo).toHaveBeenCalledWith('dQw4w9WgXcQ')
   })
 
-  it('delegates jio: IDs to JioSaavn source getMetadata', async () => {
+  it('resolves a YouTube Music URL before routing', async () => {
     const mk = new MusicKit()
-    await mk.getMetadata('jio:abc123')
-    expect(mockJioSaavnSource.getMetadata).toHaveBeenCalledWith('jio:abc123')
-  })
-
-  it('returns the Song from the JioSaavn source for jio: IDs', async () => {
-    const mk = new MusicKit()
-    const song = await mk.getMetadata('jio:abc123')
-    expect(song.title).toBe('Tum Hi Ho')
-  })
-
-  it('resolves a JioSaavn URL before routing', async () => {
-    const mk = new MusicKit()
-    await mk.getMetadata('https://www.jiosaavn.com/song/tum-hi-ho/OQMaey5hbVc')
-    expect(mockJioSaavnSource.getMetadata).toHaveBeenCalledWith('jio:OQMaey5hbVc')
+    await mk.getMetadata('https://music.youtube.com/watch?v=dQw4w9WgXcQ')
+    expect(mockDiscovery.getInfo).toHaveBeenCalledWith('dQw4w9WgXcQ')
   })
 })

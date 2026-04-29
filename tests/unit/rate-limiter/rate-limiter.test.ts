@@ -126,3 +126,42 @@ describe('RateLimiter', () => {
     })
   })
 })
+
+// ── weighted throttle ─────────────────────────────────────────────────────────
+
+describe('weighted throttle', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('a weight-2 call consumes 2 tokens instead of 1', async () => {
+    const limiter = new RateLimiter({ search: 5 }, 0)
+
+    await limiter.throttle('search', undefined, 2)
+
+    // 5 - 2 = 3 tokens remaining → still capacity
+    expect(limiter.getWaitTime('search')).toBe(0)
+    // consume remaining 3 with weight 1 each
+    await limiter.throttle('search')
+    await limiter.throttle('search')
+    await limiter.throttle('search')
+    // now exhausted
+    expect(limiter.getWaitTime('search')).toBeGreaterThan(0)
+  })
+
+  it('weight defaults to 1 when not specified', async () => {
+    const limiter = new RateLimiter({ search: 2 }, 0)
+
+    await limiter.throttle('search')
+    await limiter.throttle('search')
+
+    expect(limiter.getWaitTime('search')).toBeGreaterThan(0)
+  })
+
+  it('a single heavy call exhausts the bucket when weight equals the limit', async () => {
+    const limiter = new RateLimiter({ search: 3 }, 0)
+
+    await limiter.throttle('search', undefined, 3)
+
+    expect(limiter.getWaitTime('search')).toBeGreaterThan(0)
+  })
+})

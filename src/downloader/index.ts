@@ -40,6 +40,7 @@ function ytdlpDownload(
       '--remote-components', 'ejs:github',
       '-f', format === 'm4a' ? 'bestaudio[ext=m4a]/bestaudio' : 'bestaudio[ext=webm]/bestaudio',
       '-x', '--audio-format', format,
+      '--embed-metadata',
       '-o', destFile,
       `https://music.youtube.com/watch?v=${videoId}`,
     ])

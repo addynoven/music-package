@@ -24,10 +24,10 @@ export class RateLimiter {
     }
   }
 
-  async throttle(endpoint: string, onLimited?: (endpoint: string, waitMs: number) => void): Promise<void> {
+  async throttle(endpoint: string, onLimited?: (endpoint: string, waitMs: number) => void, weight = 1): Promise<void> {
     const waited = await this.enforceMinGap()
     if (waited > 0) onLimited?.(endpoint, waited)
-    this.consumeToken(endpoint)
+    this.consumeToken(endpoint, weight)
   }
 
   getWaitTime(endpoint: string): number {
@@ -48,10 +48,10 @@ export class RateLimiter {
     return 0
   }
 
-  private consumeToken(endpoint: string): void {
+  private consumeToken(endpoint: string, weight = 1): void {
     const bucket = this.getBucket(endpoint)
     this.refillIfNeeded(bucket)
-    if (bucket.tokens > 0) bucket.tokens--
+    bucket.tokens = Math.max(0, bucket.tokens - weight)
   }
 
   private getBucket(endpoint: string): Bucket {

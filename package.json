@@ -34,6 +34,7 @@
   ],
   "author": "capitalcurv8",
   "license": "MIT",
+  "sideEffects": false,
   "files": [
     "dist",
     "README.md"

@@ -28,9 +28,11 @@ import type {
   Album,
   Artist,
   Playlist,
+  Podcast,
   Section,
   AudioTrack,
   StreamingData,
+  Lyrics,
   SearchFilter,
   Quality,
   DownloadOptions,
@@ -431,15 +433,15 @@ export class MusicKit {
     return result
   }
 
-  async getLyrics(id: string): Promise<import('../models').Lyrics | null> {
+  async getLyrics(id: string): Promise<Lyrics | null> {
     await this.ensureClients()
     const resolved = resolveInput(id)
 
     const cacheKey = `lyrics:${resolved}`
-    const cached = this.cache.get<import('../models').Lyrics>(cacheKey)
+    const cached = this.cache.get<Lyrics>(cacheKey)
     if (cached !== null) return cached
 
-    let lyrics: import('../models').Lyrics | null = null
+    let lyrics: Lyrics | null = null
 
     try {
       const meta = await this.getMetadata(resolved)
@@ -540,7 +542,7 @@ export class MusicKit {
     }
   }
 
-  async getPodcast(feedUrl: string): Promise<import('../models').Podcast> {
+  async getPodcast(feedUrl: string): Promise<Podcast> {
     if (!this._podcast) this._podcast = new PodcastClient()
     return this._podcast.getFeed(feedUrl)
   }

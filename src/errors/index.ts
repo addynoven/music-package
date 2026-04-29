@@ -1,10 +1,11 @@
 export class MusicKitBaseError extends Error {
   readonly code: string
 
-  constructor(message: string, code: string) {
+  constructor(message: string, code: string, cause?: unknown) {
     super(message)
     this.name = 'MusicKitBaseError'
     this.code = code
+    if (cause !== undefined) (this as any).cause = cause
     if (Error.captureStackTrace) Error.captureStackTrace(this, this.constructor)
   }
 }
@@ -31,13 +32,11 @@ export class RateLimitError extends MusicKitBaseError {
 
 export class NetworkError extends MusicKitBaseError {
   readonly statusCode?: number
-  readonly cause?: unknown
 
   constructor(message: string, statusCode?: number, cause?: unknown) {
-    super(message, 'NETWORK_ERROR')
+    super(message, 'NETWORK_ERROR', cause)
     this.name = 'NetworkError'
     this.statusCode = statusCode
-    this.cause = cause
   }
 }
 
@@ -54,8 +53,8 @@ export class ValidationError extends MusicKitBaseError {
 export class StreamError extends MusicKitBaseError {
   readonly videoId: string
 
-  constructor(message: string, videoId: string) {
-    super(message, 'STREAM_ERROR')
+  constructor(message: string, videoId: string, cause?: unknown) {
+    super(message, 'STREAM_ERROR', cause)
     this.name = 'StreamError'
     this.videoId = videoId
   }

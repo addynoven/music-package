@@ -2,6 +2,14 @@ export { MusicKit } from './musickit'
 export { Cache } from './cache'
 export { RateLimiter } from './rate-limiter'
 export { RetryEngine, HttpError } from './retry'
+export {
+  MusicKitBaseError,
+  NotFoundError,
+  RateLimitError,
+  NetworkError,
+  ValidationError,
+  StreamError,
+} from './errors'
 export { SessionManager } from './session'
 export { DiscoveryClient } from './discovery'
 export { StreamResolver } from './stream'
@@ -9,11 +17,13 @@ export { Downloader } from './downloader'
 export { MusicKitEmitter } from './events'
 
 // Value exports (usable at runtime)
+export { version } from '../package.json'
 export { SearchFilter } from './models'
 export { MusicKitErrorCode } from './models'
 export { getBestThumbnail } from './utils/thumbnails'
 export { isStreamExpired } from './utils/stream-utils'
 export { JIOSAAVN_LANGUAGES } from './sources/jiosaavn'
+export { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp } from './lyrics/lrc-utils'
 
 // Type exports
 export type {

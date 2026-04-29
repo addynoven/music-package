@@ -15,6 +15,7 @@ import { fetchFromLyricsOvh } from '../lyrics/lyrics-ovh'
 import { resolveInput } from '../utils/url-resolver'
 import { isStreamExpired } from '../utils/stream-utils'
 import { rankSongs } from '../discovery/ranker'
+import { ValidationError, NotFoundError, NetworkError } from '../errors'
 import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
@@ -113,11 +114,11 @@ export class MusicKit {
     if (override) {
       const targetName = override === 'youtube' ? 'youtube-music' : 'jiosaavn'
       const found = this.sources.find(s => s.name === targetName)
-      if (!found) throw new Error(`Source '${override}' is not registered — check your sourceOrder config`)
+      if (!found) throw new ValidationError(`Source '${override}' is not registered — check your sourceOrder config`, 'sourceOrder')
       return found
     }
     const source = this.sources.find(s => s.canHandle(query))
-    if (!source) throw new Error(`No source can handle: ${query}`)
+    if (!source) throw new NotFoundError(`No source can handle: ${query}`, query)
     return source
   }
 
@@ -172,6 +173,10 @@ export class MusicKit {
 
   off(event: EventName, handler: EventHandler<typeof event>): void {
     this.emitter.off(event as any, handler as any)
+  }
+
+  once(event: EventName, handler: EventHandler<typeof event>): void {
+    this.emitter.once(event as any, handler as any)
   }
 
   async autocomplete(query: string): Promise<string[]> {
@@ -452,7 +457,7 @@ export class MusicKit {
       const meta = await this.sourceFor(id).getMetadata(id)
       const ytSongs = await this._discovery!.search(`${meta.title} ${meta.artist}`, { filter: 'songs' }) as Song[]
       const match = ytSongs.find(s => s.videoId && !s.videoId.startsWith('jio:'))
-      if (!match?.videoId) throw new Error(`No downloadable YouTube equivalent found for: ${id}`)
+      if (!match?.videoId) throw new NotFoundError(`No downloadable YouTube equivalent found for: ${id}`, id)
       id = match.videoId
     }
 
@@ -466,7 +471,7 @@ export class MusicKit {
     if (resolved.startsWith('jio:')) {
       const streamData = await this.call('stream', () => this.sourceFor(resolved).getStream(resolved, 'high'))
       const response = await fetch(streamData.url)
-      if (!response.ok) throw new Error(`Stream fetch failed: ${response.status}`)
+      if (!response.ok) throw new NetworkError(`Stream fetch failed: ${response.status}`, response.status)
       const { Readable } = await import('node:stream')
       return Readable.fromWeb(response.body as any)
     }

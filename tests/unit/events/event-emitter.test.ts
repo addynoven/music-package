@@ -85,6 +85,68 @@ describe('MusicKitEmitter', () => {
     })
   })
 
+  // ─── once ─────────────────────────────────────────────────────────────────
+
+  describe('once', () => {
+    it('fires the handler exactly once on the first emit', () => {
+      const emitter = new MusicKitEmitter()
+      const handler = vi.fn()
+
+      emitter.once('cacheHit', handler)
+      emitter.emit('cacheHit', 'key', 60)
+
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('key', 60)
+    })
+
+    it('does not fire on subsequent emits', () => {
+      const emitter = new MusicKitEmitter()
+      const handler = vi.fn()
+
+      emitter.once('cacheHit', handler)
+      emitter.emit('cacheHit', 'key', 60)
+      emitter.emit('cacheHit', 'key', 60)
+      emitter.emit('cacheHit', 'key', 60)
+
+      expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('coexists with persistent on() handlers', () => {
+      const emitter = new MusicKitEmitter()
+      const once = vi.fn()
+      const always = vi.fn()
+
+      emitter.once('cacheHit', once)
+      emitter.on('cacheHit', always)
+      emitter.emit('cacheHit', 'key', 60)
+      emitter.emit('cacheHit', 'key', 60)
+
+      expect(once).toHaveBeenCalledTimes(1)
+      expect(always).toHaveBeenCalledTimes(2)
+    })
+
+    it('can be removed with off() before it fires', () => {
+      const emitter = new MusicKitEmitter()
+      const handler = vi.fn()
+
+      emitter.once('cacheHit', handler)
+      emitter.off('cacheHit', handler)
+      emitter.emit('cacheHit', 'key', 60)
+
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('passes all event arguments to the handler', () => {
+      const emitter = new MusicKitEmitter()
+      const handler = vi.fn()
+
+      emitter.once('rateLimited', handler)
+      emitter.emit('rateLimited', 'search', 5000)
+
+      expect(handler).toHaveBeenCalledWith('search', 5000)
+    })
+  })
+
   // ─── emit with no handlers ────────────────────────────────────────────────
 
   describe('emit with no handlers', () => {

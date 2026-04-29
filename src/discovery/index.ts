@@ -1,5 +1,6 @@
 import type { Innertube } from 'youtubei.js'
 import type { Song, Album, Artist, Playlist, Section, SearchResults, SearchFilter, Thumbnail } from '../models'
+import { NotFoundError } from '../errors'
 
 function extractText(value: any): string {
   if (!value) return ''
@@ -163,7 +164,7 @@ export class DiscoveryClient {
 
   async getArtist(channelId: string): Promise<Artist> {
     const res = await this.yt.music.getArtist(channelId) as any
-    if (!res) throw new Error(`Artist not found: ${channelId}`)
+    if (!res) throw new NotFoundError(`Artist not found: ${channelId}`, channelId)
 
     const name = extractText(res.header?.title) || 'Unknown'
     const songs: Song[] = []
@@ -194,7 +195,7 @@ export class DiscoveryClient {
 
   async getAlbum(browseId: string): Promise<Album> {
     const res = await this.yt.music.getAlbum(browseId) as any
-    if (!res) throw new Error(`Album not found: ${browseId}`)
+    if (!res) throw new NotFoundError(`Album not found: ${browseId}`, browseId)
 
     const header = res.header
     // MusicDetailHeader exposes .year and .author directly — prefer those over subtitle parsing
@@ -228,7 +229,7 @@ export class DiscoveryClient {
 
   async getPlaylist(playlistId: string): Promise<Playlist> {
     const res = await (this.yt.music as any).getPlaylist(playlistId) as any
-    if (!res) throw new Error(`Playlist not found: ${playlistId}`)
+    if (!res) throw new NotFoundError(`Playlist not found: ${playlistId}`, playlistId)
     const header = res.header ?? {}
     const tracks: Song[] = (res.contents ?? res.items ?? [])
       .map((item: any) => item.primary ?? item)

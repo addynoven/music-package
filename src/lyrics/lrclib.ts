@@ -1,4 +1,5 @@
-import type { Lyrics, LyricLine } from '../models'
+import { parseLrc } from './lrc-utils'
+import type { Lyrics } from '../models'
 
 interface LrclibResponse {
   plainLyrics?: string
@@ -21,16 +22,4 @@ export async function fetchFromLrclib(artist: string, title: string): Promise<Ly
   } catch {
     return null
   }
-}
-
-function parseLrc(lrc: string): LyricLine[] {
-  const lines: LyricLine[] = []
-  for (const line of lrc.split('\n')) {
-    const match = line.match(/^\[(\d+):(\d+\.\d+)\]\s*(.*)/)
-    if (!match) continue
-    const time = parseInt(match[1], 10) * 60 + parseFloat(match[2])
-    const text = match[3].trim()
-    if (text) lines.push({ time, text })
-  }
-  return lines
 }

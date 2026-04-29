@@ -1,3 +1,4 @@
+import { NotFoundError, NetworkError } from '../errors'
 import type { AudioSource } from './audio-source'
 import type { Song, StreamingData, SearchResults, SearchFilter, Thumbnail } from '../models'
 import type { StreamResolver } from '../stream'
@@ -18,7 +19,7 @@ async function ytFetch<T>(url: URL): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new Error(`YouTube Data API error ${res.status}: ${body.slice(0, 200)}`)
+    throw new NetworkError(`YouTube Data API error ${res.status}: ${body.slice(0, 200)}`, res.status)
   }
   return res.json() as Promise<T>
 }
@@ -117,7 +118,7 @@ export class YouTubeDataAPISource implements AudioSource {
 
     const data = await ytFetch<{ items: YTVideoItem[] }>(url)
     const item = data.items?.[0]
-    if (!item) throw new Error(`Video not found: ${id}`)
+    if (!item) throw new NotFoundError(`Video not found: ${id}`, id)
 
     return {
       type: 'song',

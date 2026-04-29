@@ -2,6 +2,7 @@ import { createWriteStream } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { StreamResolver } from '../stream'
+import { NetworkError } from '../errors'
 import type { DiscoveryClient } from '../discovery'
 import type { Song } from '../models'
 
@@ -159,7 +160,7 @@ export class Downloader {
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: audio fetch failed`)
+      throw new NetworkError(`HTTP ${response.status}: audio fetch failed`, response.status)
     }
 
     const { Readable } = await import('node:stream')

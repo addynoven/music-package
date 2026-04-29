@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { Cache } from '../cache'
+import { StreamError } from '../errors'
 import type { StreamingData, Quality } from '../models'
 
 function parseExpiry(url: string): number {
@@ -24,10 +25,10 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
       // yt-dlp exits 1 when no JS runtime is available but still writes valid JSON to stdout.
       // Try stdout first; only hard-fail if it's absent or unparseable.
       try {
-        if (!stdout?.trim()) throw new Error('no output')
+        if (!stdout?.trim()) throw new StreamError('no output', videoId)
         const json = JSON.parse(stdout)
         const url: string = json.url
-        if (!url) throw new Error('no url in output')
+        if (!url) throw new StreamError('no url in output', videoId)
         const acodec: string = json.acodec ?? ''
         const codec: 'opus' | 'mp4a' = acodec.includes('opus') ? 'opus' : 'mp4a'
         const bitrateKbps: number = json.abr ?? json.tbr ?? 0

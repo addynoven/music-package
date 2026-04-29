@@ -1,5 +1,6 @@
 import { decryptStreamUrl } from './decrypt'
 import { DefaultJioSaavnClient } from './client'
+import { NotFoundError } from '../../errors'
 import type { JioSaavnClient, RawSong, RawAlbumResult, RawArtistResult, RawPlaylistResult } from './client'
 import type { AudioSource } from '../audio-source'
 import type { Song, Album, Artist, Playlist, Section, SearchResults, StreamingData, SearchFilter, Thumbnail } from '../../models'
@@ -180,7 +181,7 @@ export class JioSaavnSource implements AudioSource {
   async getStream(id: string, quality: 'high' | 'low' = 'high'): Promise<StreamingData> {
     const raw = await this.client.getSong(stripPrefix(id))
     const song = raw.songs?.[0]
-    if (!song) throw new Error(`JioSaavn: song not found — ${id}`)
+    if (!song) throw new NotFoundError(`JioSaavn: song not found — ${id}`, id)
 
     const decrypted = decryptStreamUrl(song.more_info.encrypted_media_url)
     const { suffix, bitrate } = BITRATE[quality]
@@ -192,7 +193,7 @@ export class JioSaavnSource implements AudioSource {
   async getMetadata(id: string): Promise<Song> {
     const raw = await this.client.getSong(stripPrefix(id))
     const song = raw.songs?.[0]
-    if (!song) throw new Error(`JioSaavn: song not found — ${id}`)
+    if (!song) throw new NotFoundError(`JioSaavn: song not found — ${id}`, id)
     return { ...mapSong(song), videoId: id.startsWith('jio:') ? id : `jio:${id}` }
   }
 

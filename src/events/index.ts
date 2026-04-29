@@ -14,6 +14,7 @@ type Handler<E extends EventName> = (...args: EventMap[E]) => void
 
 export class MusicKitEmitter {
   private handlers = new Map<EventName, Set<Function>>()
+  private onceMap = new Map<Function, Function>()
 
   on<E extends EventName>(event: E, handler: Handler<E>): void {
     if (!this.handlers.has(event)) this.handlers.set(event, new Set())
@@ -21,7 +22,22 @@ export class MusicKitEmitter {
   }
 
   off<E extends EventName>(event: E, handler: Handler<E>): void {
-    this.handlers.get(event)?.delete(handler)
+    const wrapper = this.onceMap.get(handler)
+    if (wrapper) {
+      this.onceMap.delete(handler)
+      this.handlers.get(event)?.delete(wrapper)
+    } else {
+      this.handlers.get(event)?.delete(handler)
+    }
+  }
+
+  once<E extends EventName>(event: E, handler: Handler<E>): void {
+    const wrapper = ((...args: EventMap[E]) => {
+      this.off(event, handler)
+      handler(...args)
+    }) as Handler<E>
+    this.onceMap.set(handler, wrapper)
+    this.on(event, wrapper)
   }
 
   emit<E extends EventName>(event: E, ...args: EventMap[E]): void {

@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
-import { readFile, unlink } from 'node:fs/promises'
+import { spawn, execFile } from 'node:child_process'
+import { unlink } from 'node:fs/promises'
 import { NetworkError } from '../errors'
 
 const ACOUSTID_ENDPOINT = 'https://api.acoustid.org/v2/lookup'
@@ -21,7 +21,7 @@ export class Identifier {
   async lookup(fingerprint: string, duration: number): Promise<IdentifyResult | null> {
     const params = new URLSearchParams({
       client: this.options.acoustidApiKey,
-      meta: 'recordings+compress',
+      meta: 'recordings recordings.compress',
       duration: String(Math.round(duration)),
       fingerprint,
     })
@@ -46,35 +46,21 @@ export class Identifier {
     return { artist, title, score: best.score }
   }
 
-  async fingerprint(filePath: string): Promise<{ fingerprint: string; duration: number }> {
-    const pcmBuffer = await this.decodeToPCM(filePath)
-    const sampleRate = 44100
-    const channels = 1
-    const duration = Math.floor(pcmBuffer.length / (4 * channels)) / sampleRate
-
-    const fakeAudioBuffer = this.buildFakeAudioBuffer(pcmBuffer, sampleRate, channels)
-
-    const savedWindow = (global as any).window
-    ;(global as any).window = {
-      AudioContext: class {
-        decodeAudioData() { return Promise.resolve(fakeAudioBuffer) }
-      },
-    }
-
-    try {
-      const { processAudioFile } = await import('@unimusic/chromaprint')
-      const fileBytes = await readFile(filePath)
-      const gen = processAudioFile(fileBytes.buffer as ArrayBuffer)
-      const { value } = await gen.next()
-      if (!value) throw new Error('Chromaprint returned no fingerprint')
-      return { fingerprint: value, duration }
-    } finally {
-      if (savedWindow !== undefined) {
-        ;(global as any).window = savedWindow
-      } else {
-        delete (global as any).window
-      }
-    }
+  fingerprint(filePath: string): Promise<{ fingerprint: string; duration: number }> {
+    return new Promise((resolve, reject) => {
+      execFile('fpcalc', ['-json', filePath], (err, stdout) => {
+        if (err) {
+          reject(new Error(`fpcalc failed: ${err.message}`))
+          return
+        }
+        try {
+          const data = JSON.parse(stdout) as { duration: number; fingerprint: string }
+          resolve({ fingerprint: data.fingerprint, duration: data.duration })
+        } catch {
+          reject(new Error('fpcalc returned invalid JSON'))
+        }
+      })
+    })
   }
 
   async recognizeWithSongrec(filePath: string): Promise<IdentifyResult | null> {
@@ -132,40 +118,4 @@ export class Identifier {
     })
   }
 
-  private decodeToPCM(filePath: string): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const ffmpeg = spawn('ffmpeg', [
-        '-hide_banner', '-loglevel', 'error',
-        '-i', filePath,
-        '-ar', '44100',
-        '-ac', '1',
-        '-f', 'f32le',
-        'pipe:1',
-      ])
-      const chunks: Buffer[] = []
-      ffmpeg.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
-      ffmpeg.stderr.resume()
-      ffmpeg.on('error', (err) => reject(new Error(`ffmpeg not found: ${err.message}`)))
-      ffmpeg.on('close', (code) => {
-        if (code !== 0) reject(new Error(`ffmpeg decode failed (exit ${code})`))
-        else resolve(Buffer.concat(chunks))
-      })
-    })
-  }
-
-  private buildFakeAudioBuffer(pcmBuffer: Buffer, sampleRate: number, channels: number) {
-    const length = Math.floor(pcmBuffer.length / (4 * channels))
-    return {
-      sampleRate,
-      numberOfChannels: channels,
-      length,
-      getChannelData: (channel: number): Float32Array => {
-        const samples = new Float32Array(length)
-        for (let i = 0; i < length; i++) {
-          samples[i] = pcmBuffer.readFloatLE((i * channels + channel) * 4)
-        }
-        return samples
-      },
-    }
-  }
 }

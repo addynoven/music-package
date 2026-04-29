@@ -3,9 +3,10 @@ import { Identifier } from '../../../src/identifier'
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
+  execFile: vi.fn(),
 }))
 
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 
 // ─── AcoustID lookup tests (pure HTTP, no audio needed) ──────────────────────
@@ -125,6 +126,43 @@ describe('Identifier.lookup', () => {
     expect(calledUrl).toContain('client=test-key')
     expect(calledUrl).toContain('fingerprint=fp123')
     expect(calledUrl).toContain('duration=100')
+  })
+})
+
+// ─── Identifier.fingerprint (fpcalc) tests ───────────────────────────────────
+
+describe('Identifier.fingerprint', () => {
+  let identifier: Identifier
+
+  beforeEach(() => {
+    identifier = new Identifier({ acoustidApiKey: 'key' })
+    vi.clearAllMocks()
+  })
+
+  it('returns fingerprint and duration from fpcalc JSON output', async () => {
+    vi.mocked(execFile).mockImplementation((_bin, _args, cb: any) => {
+      cb(null, JSON.stringify({ duration: 254.29, fingerprint: 'AQADtMmybGkSRZGU' }), '')
+      return {} as any
+    })
+    const result = await identifier.fingerprint('./song.mp3')
+    expect(result).toEqual({ fingerprint: 'AQADtMmybGkSRZGU', duration: 254.29 })
+  })
+
+  it('calls fpcalc with -json and the file path', async () => {
+    vi.mocked(execFile).mockImplementation((_bin, _args, cb: any) => {
+      cb(null, JSON.stringify({ duration: 100, fingerprint: 'abc' }), '')
+      return {} as any
+    })
+    await identifier.fingerprint('./my-song.opus')
+    expect(execFile).toHaveBeenCalledWith('fpcalc', ['-json', './my-song.opus'], expect.any(Function))
+  })
+
+  it('throws when fpcalc exits with an error', async () => {
+    vi.mocked(execFile).mockImplementation((_bin, _args, cb: any) => {
+      cb(new Error('fpcalc: command not found'), '', '')
+      return {} as any
+    })
+    await expect(identifier.fingerprint('./song.mp3')).rejects.toThrow('fpcalc failed')
   })
 })
 

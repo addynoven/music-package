@@ -1,6 +1,8 @@
 const JIOSAAVN_RE = /^https?:\/\/(?:www\.)?jiosaavn\.com\//
 const YOUTUBE_WATCH_RE = /^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?|youtu\.be\/)(.+)/
 const YTM_BASE = 'music.youtube.com'
+const SPOTIFY_TRACK_RE = /^https?:\/\/open\.spotify\.com\/track\//
+const TITLE_RE = /<title[^>]*>([^<]+)<\/title>/i
 
 /**
  * Resolves any URL to the canonical ID or query string the source pipeline expects.
@@ -61,6 +63,30 @@ function resolveYouTubeUrl(input: string): string | null {
     }
 
     return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves a Spotify track URL to a "Title Artist" search query by scraping
+ * the open.spotify.com page title. Returns null for non-track URLs or failures.
+ */
+export async function resolveSpotifyUrl(url: string): Promise<string | null> {
+  if (!SPOTIFY_TRACK_RE.test(url)) return null
+
+  try {
+    const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    if (!resp.ok) return null
+    const html = await resp.text()
+    const m = TITLE_RE.exec(html)
+    if (!m) return null
+
+    // "Song Title - song and lyrics by Artist Name | Spotify"
+    let raw = m[1].trim()
+    raw = raw.replace(/\s*-\s*song\s+and\s+lyrics\s+by\s+/i, ' ')
+    raw = raw.replace(/\s*\|\s*Spotify\s*$/i, '')
+    return raw.trim() || null
   } catch {
     return null
   }

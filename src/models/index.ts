@@ -212,3 +212,30 @@ export type MusicKitEvent =
   | 'visitorIdRefreshed'
   | 'retry'
   | 'error'
+
+export interface PodcastEpisode {
+  type: 'episode'
+  guid: string
+  title: string
+  description: string
+  url: string
+  mimeType: string
+  duration: number
+  publishedAt: string
+  thumbnails: Thumbnail[]
+  season?: number
+  episode?: number
+  explicit: boolean
+}
+
+export interface Podcast {
+  type: 'podcast'
+  feedUrl: string
+  title: string
+  description: string
+  author: string
+  language: string
+  link: string
+  thumbnails: Thumbnail[]
+  episodes: PodcastEpisode[]
+}

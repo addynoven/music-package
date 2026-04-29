@@ -7,6 +7,7 @@ import { DiscoveryClient } from '../discovery'
 import { StreamResolver } from '../stream'
 import { Downloader } from '../downloader'
 import { Identifier } from '../identifier'
+import { PodcastClient } from '../podcast'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
 import { YouTubeDataAPISource } from '../sources/youtube-data-api'
@@ -66,6 +67,7 @@ export class MusicKit {
   private _stream: StreamResolver | null = null
   private _downloader: Downloader | null = null
   private _identifier: Identifier | null = null
+  private _podcast: PodcastClient | null = null
   private _ytPromise: Promise<Innertube> | null = null
 
   constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
@@ -536,6 +538,11 @@ export class MusicKit {
     } catch {
       return this._downloader!.streamPCM(resolved)
     }
+  }
+
+  async getPodcast(feedUrl: string): Promise<import('../models').Podcast> {
+    if (!this._podcast) this._podcast = new PodcastClient()
+    return this._podcast.getFeed(feedUrl)
   }
 }
 

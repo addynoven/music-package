@@ -288,6 +288,13 @@ const related = await mk.getRelated(youtubeVideoId)
 // Charts
 const global = await mk.getCharts()
 const us     = await mk.getCharts({ country: 'US' })
+
+// Mood / genre categories (YouTube Music)
+const categories = await mk.getMoodCategories()
+// [{ title: 'Feeling Happy', params: '...' }, ...]
+
+const sections = await mk.getMoodPlaylists(categories[0].params)
+// Section[] — playlists for that mood
 ```
 
 ---
@@ -533,6 +540,9 @@ isStreamExpired(stream)                       // → boolean — true within 5mi
 resolveInput('https://youtube.com/watch?v=X') // → videoId string
 resolveSpotifyUrl('https://open.spotify.com/track/...') // → "Title Artist" | null
 
+import { version } from 'musicstream-sdk'
+console.log(version)   // e.g. "2.0.0" — the package version at runtime
+
 // LRC
 parseLrc(rawLrc)                 // → LyricLine[]
 getActiveLine(lines, currentSec) // → LyricLine | null
@@ -545,6 +555,36 @@ SearchFilter.Songs      // 'songs'
 SearchFilter.Albums     // 'albums'
 SearchFilter.Artists    // 'artists'
 SearchFilter.Playlists  // 'playlists'
+```
+
+---
+
+## Validation (Zod)
+
+Every core model has a Zod schema and a `safeParse` helper for validating unknown data at
+runtime — useful when consuming external APIs or user input alongside this SDK.
+
+```ts
+import {
+  ThumbnailSchema,
+  SongSchema,
+  AlbumSchema,
+  ArtistSchema,
+  PlaylistSchema,
+  safeParseSong,
+  safeParseAlbum,
+  safeParseArtist,
+  safeParsePlaylist,
+} from 'musicstream-sdk'
+
+// Throws ZodError if invalid
+const song = SongSchema.parse(unknownData)
+
+// Returns Song | null — never throws
+const song = safeParseSong(unknownData)
+const album = safeParseAlbum(unknownData)
+const artist = safeParseArtist(unknownData)
+const playlist = safeParsePlaylist(unknownData)
 ```
 
 ---
@@ -659,6 +699,59 @@ interface Podcast {
   episodes: PodcastEpisode[]
 }
 ```
+
+---
+
+## Error handling
+
+All SDK errors extend `MusicKitBaseError` and carry a `code` string for programmatic
+handling. Catch by class or by code:
+
+```ts
+import {
+  MusicKitBaseError,
+  NotFoundError,
+  RateLimitError,
+  NetworkError,
+  ValidationError,
+  StreamError,
+  HttpError,
+  NonRetryableError,
+  MusicKitErrorCode,
+} from 'musicstream-sdk'
+
+try {
+  await mk.getStream(id)
+} catch (err) {
+  if (err instanceof RateLimitError) {
+    console.log('retry after', err.retryAfterMs, 'ms')
+  } else if (err instanceof NetworkError) {
+    console.log('http status', err.statusCode, 'cause', err.cause)
+  } else if (err instanceof NotFoundError) {
+    console.log('not found', err.resourceId)
+  } else if (err instanceof StreamError) {
+    console.log('stream failed for', err.videoId)
+  } else if (err instanceof MusicKitBaseError) {
+    console.log('sdk error', err.code)  // MusicKitErrorCode string
+  }
+}
+
+// Inside a custom RetryEngine / source — stop retrying immediately:
+throw new NonRetryableError('bad input, do not retry')
+
+// HttpError — low-level HTTP status + body, used internally, re-exported for custom sources
+throw new HttpError(404, 'Not Found')
+```
+
+| Class | Code | When thrown |
+|---|---|---|
+| `NotFoundError` | `NOT_FOUND` | Resource doesn't exist |
+| `RateLimitError` | `RATE_LIMITED` | 429 from any source |
+| `NetworkError` | `NETWORK_ERROR` | HTTP failure or fetch error |
+| `ValidationError` | `VALIDATION_ERROR` | Bad input / missing config |
+| `StreamError` | `STREAM_ERROR` | Stream URL resolution failed |
+| `HttpError` | — | Raw HTTP error (internal) |
+| `NonRetryableError` | — | Forces retry engine to stop immediately |
 
 ---
 

@@ -28,22 +28,52 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 
 ## Features
 
-- **Search** — songs, albums, artists, playlists with typed overloads per filter
-- **Stream** — playable URLs, raw audio stream, raw PCM (48 kHz/16-bit/stereo for Discord bots)
-- **Browse** — home feed, artist, album, playlist, radio, charts, mood playlists
-- **Lyrics** — synced (LRC timestamps) + plain text via LRCLib, fallback to lyrics.ovh
-- **LRC utilities** — parse, seek, offset, reserialize synced lyrics
-- **Download** — audio file download via yt-dlp with progress callback
-- **Queue** — in-memory playback queue with repeat modes, shuffle, reorder, history
-- **Podcast** — fetch and parse any RSS feed, full iTunes namespace support
-- **Audio identification** — fingerprint a file via AcoustID + optional SongRec (Shazam)
-- **Spotify resolver** — convert Spotify track URLs to search queries
-- **Dual source routing** — JioSaavn-first for Indian music, YouTube Music everywhere else
-- **SQLite cache** — stream URLs, search results, lyrics cached out of the box
-- **Rate limiter + retry** — exponential backoff, 429 handling, configurable per endpoint
-- **Custom sources** — implement `AudioSource` to add any platform
-- **Zod validation** — schemas and `safeParse` helpers for all core models
-- **Full TypeScript** — strict types, typed events, typed search overloads
+**Search & Discovery**
+- **Search** — songs, albums, artists, playlists — typed return type per filter
+- **Autocomplete** — real-time search suggestions as you type
+- **Charts** — country-specific top charts
+- **Mood / genre playlists** — browse YouTube Music mood categories
+- **Home feed** — personalized sections ("Trending", "New Releases", "Top Picks", etc.)
+- **Featured playlists** — JioSaavn curated playlists by language
+
+**Streaming**
+- **Playable stream URLs** — pre-signed, cached ~6 hours, auto-refreshed
+- **Quality control** — `high` / `low` quality per individual request
+- **Raw audio stream** — yt-dlp stdout as a Node.js Readable, zero decode overhead
+- **Raw PCM stream** — 48 kHz / 16-bit LE / stereo — drop straight into a Discord voice connection
+
+**URL Resolution**
+- **Paste any URL, it just works** — YouTube (`youtube.com/watch`, `youtu.be`), YouTube Music (`music.youtube.com/watch`, `/browse`, `/playlist`, `/search`), JioSaavn (`jiosaavn.com/song/...`) — all resolve to the right ID automatically
+- **Spotify resolver** — converts a Spotify track URL to a `"Title Artist"` search query
+
+**Metadata & Lyrics**
+- **Track metadata** — title, artist, album, duration, thumbnails
+- **Synced lyrics (LRC)** — per-line timestamps from LRCLib
+- **Plain text lyrics** — fallback via lyrics.ovh when LRC is unavailable
+- **LRC utilities** — parse, seek to timestamp, offset, reserialize `.lrc` files
+
+**Browse**
+- **Artist pages** — top songs, albums, singles
+- **Album pages** — full track listing
+- **Playlist pages** — all songs with metadata
+- **Radio / seed stations** — generate a station from any track ID
+- **Related tracks** — "you might also like" recommendations
+- **Up-next suggestions** — YouTube's continuation queue for any track
+
+**Download & Identification**
+- **Download** — save audio as `opus` or `m4a` via yt-dlp, with per-chunk progress callback
+- **Audio identification** — fingerprint any local file via AcoustID + optional SongRec (Shazam)
+- **Podcast / RSS** — parse any RSS feed, full iTunes namespace, direct episode audio URLs
+
+**Infrastructure**
+- **Dual source routing** — JioSaavn for Indian languages (Hindi, Tamil, Telugu, etc.), YouTube Music everywhere else — or configure your own order
+- **SQLite cache** — built on Node 22's `node:sqlite` (zero native deps), automatic TTL per data type
+- **Rate limiter + retry** — per-endpoint limits, exponential backoff, 429-aware
+- **Event system** — `beforeRequest`, `afterRequest`, `cacheHit`, `cacheMiss`, `rateLimited`, `retry`, `error`
+- **Custom sources** — implement `AudioSource` and register any platform with `mk.registerSource()`
+- **Zod validation** — schemas + `safeParse` helpers for all core models
+- **Full TypeScript** — strict types, typed search overloads, typed events
+- **Playback queue** — in-memory queue with repeat modes (`off`/`one`/`all`), shuffle, history, reorder
 
 ---
 
@@ -68,6 +98,7 @@ const lyrics = await mk.getLyrics(songs[0].videoId)
 - [Validation](#validation)
 - [Error Handling](#error-handling)
 - [Utilities](#utilities)
+  - [URL Resolver](#url-resolver)
 - [Data Models](#data-models)
 - [Requirements](#requirements)
 
@@ -496,6 +527,27 @@ try {
 ---
 
 ## Utilities
+
+### URL resolver
+
+Paste any URL — the SDK figures out the ID or query automatically:
+
+```ts
+import { resolveInput } from 'musicstream-sdk'
+
+resolveInput('https://www.youtube.com/watch?v=dQw4w9WgXcQ')   // "dQw4w9WgXcQ"
+resolveInput('https://youtu.be/dQw4w9WgXcQ')                  // "dQw4w9WgXcQ"
+resolveInput('https://music.youtube.com/watch?v=dQw4w9WgXcQ') // "dQw4w9WgXcQ"
+resolveInput('https://music.youtube.com/browse/MPREb_...')     // "MPREb_..."  (album/artist)
+resolveInput('https://music.youtube.com/playlist?list=PL...') // "PL..."      (playlist)
+resolveInput('https://music.youtube.com/search?q=tum+hi+ho')  // "tum hi ho" (search query)
+resolveInput('https://www.jiosaavn.com/song/tum-hi-ho/xyz')   // "jio:xyz"
+resolveInput('some plain search query')                        // "some plain search query"
+
+// So you can do:
+const id = resolveInput(anyInput)
+const stream = await mk.getStream(id)  // works for URL, video ID, or jio: ID
+```
 
 ```ts
 import {

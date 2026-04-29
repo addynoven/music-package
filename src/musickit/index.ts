@@ -86,7 +86,7 @@ export class MusicKit {
 
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt)
-      this._stream = new StreamResolver(this.cache, _yt, config.cookiesPath)
+      this._stream = new StreamResolver(this.cache, config.cookiesPath)
       this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath)
     }
 
@@ -132,7 +132,7 @@ export class MusicKit {
       }
       const yt = await this._ytPromise
       this._discovery = new DiscoveryClient(yt)
-      this._stream = new StreamResolver(this.cache, yt, this.config.cookiesPath)
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath)
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath)
     }
     if (this.sources.length === 0) {

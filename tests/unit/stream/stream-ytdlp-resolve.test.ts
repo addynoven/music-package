@@ -49,7 +49,7 @@ describe('StreamResolver — yt-dlp backend', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockCache = makeMockCache()
-    resolver = new StreamResolver(mockCache as any, {} as any)
+    resolver = new StreamResolver(mockCache as any)
   })
 
   // ─── yt-dlp invocation ────────────────────────────────────────────────────
@@ -94,14 +94,10 @@ describe('StreamResolver — yt-dlp backend', () => {
       expect(args.some((a) => a.startsWith('worstaudio'))).toBe(true)
     })
 
-    it('does NOT call yt.music.getInfo — bypasses youtubei.js entirely', async () => {
-      const mockYt = { music: { getInfo: vi.fn() } }
-      const localResolver = new StreamResolver(makeMockCache() as any, mockYt as any)
+    it('does NOT use youtubei.js — resolves purely via yt-dlp', async () => {
       mockExecSuccess(ytdlpJson())
-
-      await localResolver.resolve('dQw4w9WgXcQ')
-
-      expect(mockYt.music.getInfo).not.toHaveBeenCalled()
+      await resolver.resolve('dQw4w9WgXcQ')
+      expect(execFile).toHaveBeenCalledWith('yt-dlp', expect.any(Array), expect.any(Function))
     })
   })
 
@@ -264,10 +260,25 @@ describe('StreamResolver — yt-dlp backend', () => {
   // ─── error handling ───────────────────────────────────────────────────────
 
   describe('error handling', () => {
-    it('throws when yt-dlp exits with a non-zero code', async () => {
+    it('throws when yt-dlp exits with a non-zero code and no stdout', async () => {
       mockExecFailure('ERROR: Video unavailable')
 
       await expect(resolver.resolve('dQw4w9WgXcQ')).rejects.toThrow()
+    })
+
+    it('succeeds when yt-dlp exits with code 1 but stdout has valid JSON (no JS runtime warning)', async () => {
+      // yt-dlp 2026+ exits 1 with a JS-runtime warning but still writes valid JSON to stdout.
+      // This happens on data-center IPs where YouTube forces a JS challenge.
+      const err = Object.assign(new Error('yt-dlp exited'), {
+        stderr: 'WARNING: [youtube] No supported JavaScript runtime could be found.',
+        code: 1,
+      })
+      ;(execFile as any).mockImplementation(
+        (_cmd: string, _args: string[], cb: Function) => cb(err, ytdlpJson(), err.stderr),
+      )
+
+      const result = await resolver.resolve('dQw4w9WgXcQ')
+      expect(result.url).toBeTruthy()
     })
 
     it('does not cache a failed resolution', async () => {

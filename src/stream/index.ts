@@ -1,25 +1,6 @@
 import { execFile } from 'node:child_process'
-import type { Innertube } from 'youtubei.js'
-import { Platform } from 'youtubei.js/agnostic'
 import { Cache } from '../cache'
 import type { StreamingData, Quality } from '../models'
-
-function patchEvalIfNeeded() {
-  try {
-    const shim = Platform.shim
-    if (shim && typeof shim.eval === 'function') {
-      Platform.load({
-        ...shim,
-        eval: (data: any, env: any) => {
-          const fn = new Function(...Object.keys(env), (data as any).output ?? data)
-          return fn(...Object.values(env))
-        },
-      })
-    }
-  } catch {
-    // platform not loaded yet — no-op
-  }
-}
 
 function parseExpiry(url: string): number {
   try {
@@ -40,13 +21,13 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
       '-f', formatSelector,
       `https://music.youtube.com/watch?v=${videoId}`,
     ], (err, stdout) => {
-      if (err) {
-        reject(new Error(`yt-dlp failed: ${((err as any).stderr ?? String(err)).slice(0, 200)}`))
-        return
-      }
+      // yt-dlp exits 1 when no JS runtime is available but still writes valid JSON to stdout.
+      // Try stdout first; only hard-fail if it's absent or unparseable.
       try {
+        if (!stdout?.trim()) throw new Error('no output')
         const json = JSON.parse(stdout)
         const url: string = json.url
+        if (!url) throw new Error('no url in output')
         const acodec: string = json.acodec ?? ''
         const codec: 'opus' | 'mp4a' = acodec.includes('opus') ? 'opus' : 'mp4a'
         const bitrateKbps: number = json.abr ?? json.tbr ?? 0
@@ -59,7 +40,10 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
           ...(sizeBytes != null && { sizeBytes }),
         })
       } catch (parseErr) {
-        reject(new Error(`Failed to parse yt-dlp output: ${parseErr}`))
+        reject(new Error(err
+          ? `yt-dlp failed: ${((err as any).stderr ?? String(err)).slice(0, 200)}`
+          : `Failed to parse yt-dlp output: ${parseErr}`
+        ))
       }
     })
   })
@@ -68,11 +52,8 @@ function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): 
 export class StreamResolver {
   constructor(
     private readonly cache: Cache,
-    readonly yt: Innertube,
     private readonly cookiesPath?: string,
-  ) {
-    patchEvalIfNeeded()
-  }
+  ) {}
 
   async resolve(videoId: string, quality: Quality | { codec?: string; quality?: Quality } = 'high'): Promise<StreamingData> {
     const raw: string = typeof quality === 'string' ? quality : (quality.quality ?? 'high')

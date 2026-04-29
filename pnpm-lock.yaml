@@ -14,6 +14,9 @@ importers:
       youtubei.js:
         specifier: ^17.0.1
         version: 17.0.1
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^22.19.17
@@ -1385,6 +1388,9 @@ packages:
   youtubei.js@17.0.1:
     resolution: {integrity: sha512-1lO4b8UqMDzE0oh2qEGzbBOd4UYRdxn/4PdpRM7BGTHxM6ddsEsKZTu90jp8V9FHVgC2h1UirQyqoqLiKwl+Zg==}
 
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
 snapshots:
 
   '@ampproject/remapping@2.3.0':
@@ -2610,3 +2616,5 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 2.11.0
       meriyah: 6.1.4
+
+  zod@4.3.6: {}

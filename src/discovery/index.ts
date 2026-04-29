@@ -1,6 +1,7 @@
 import type { Innertube } from 'youtubei.js'
 import type { Song, Album, Artist, Playlist, Section, SearchResults, SearchFilter, Thumbnail } from '../models'
 import { NotFoundError } from '../errors'
+import { safeParseSong, safeParseAlbum, safeParseArtist, safeParsePlaylist } from '../schemas'
 
 function extractText(value: any): string {
   if (!value) return ''
@@ -134,10 +135,10 @@ export class DiscoveryClient {
       const res = await this.yt.music.search(query, { type: typeMap[options.filter] as any })
       const items = flatContents(res)
 
-      if (options.filter === 'songs') return items.map(mapSongItem)
-      if (options.filter === 'albums') return items.map(mapAlbumItem)
-      if (options.filter === 'artists') return items.map(mapArtistItem)
-      if (options.filter === 'playlists') return items.map(mapPlaylistItem)
+      if (options.filter === 'songs') return items.map(mapSongItem).filter((s): s is Song => safeParseSong(s) !== null)
+      if (options.filter === 'albums') return items.map(mapAlbumItem).filter((a): a is Album => safeParseAlbum(a) !== null)
+      if (options.filter === 'artists') return items.map(mapArtistItem).filter((a): a is Artist => safeParseArtist(a) !== null)
+      if (options.filter === 'playlists') return items.map(mapPlaylistItem).filter((p): p is Playlist => safeParsePlaylist(p) !== null)
       return []
     }
 
@@ -145,9 +146,9 @@ export class DiscoveryClient {
     const all = flatContents(res)
 
     return {
-      songs: all.filter((i: any) => i.item_type === 'song' || i.duration?.seconds).map(mapSongItem),
-      albums: all.filter((i: any) => i.item_type === 'album').map(mapAlbumItem),
-      artists: all.filter((i: any) => i.item_type === 'artist').map(mapArtistItem),
+      songs: all.filter((i: any) => i.item_type === 'song' || i.duration?.seconds).map(mapSongItem).filter((s): s is Song => safeParseSong(s) !== null),
+      albums: all.filter((i: any) => i.item_type === 'album').map(mapAlbumItem).filter((a): a is Album => safeParseAlbum(a) !== null),
+      artists: all.filter((i: any) => i.item_type === 'artist').map(mapArtistItem).filter((a): a is Artist => safeParseArtist(a) !== null),
       playlists: [],
     }
   }

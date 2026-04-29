@@ -66,8 +66,10 @@ export class Identifier {
   async recognizeWithSongrec(filePath: string): Promise<IdentifyResult | null> {
     if (!this.options.songrecBin) return null
 
+    const duration = await this.getAudioDuration(filePath)
+    const startSec = Math.max(0, Math.min(60, duration - 15))
     const clipPath = `/tmp/songrec-clip-${Date.now()}.wav`
-    await this.extractClip(filePath, clipPath)
+    await this.extractClip(filePath, clipPath, startSec)
 
     let output: string
     try {
@@ -98,11 +100,30 @@ export class Identifier {
     }
   }
 
-  private extractClip(inputPath: string, outputPath: string): Promise<void> {
+  private getAudioDuration(filePath: string): Promise<number> {
+    return new Promise((resolve) => {
+      const proc = spawn('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'csv=p=0',
+        filePath,
+      ])
+      let output = ''
+      proc.stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
+      proc.stderr.resume()
+      proc.on('error', () => resolve(0))
+      proc.on('close', () => {
+        const d = parseFloat(output.trim())
+        resolve(isNaN(d) ? 0 : d)
+      })
+    })
+  }
+
+  private extractClip(inputPath: string, outputPath: string, startSec = 0): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn('ffmpeg', [
         '-hide_banner', '-loglevel', 'error',
-        '-ss', '60',
+        '-ss', String(startSec),
         '-t', '10',
         '-i', inputPath,
         '-ar', '44100', '-ac', '1',

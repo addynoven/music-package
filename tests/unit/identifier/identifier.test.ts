@@ -227,6 +227,7 @@ describe('Identifier.recognizeWithSongrec', () => {
 
   it('returns artist and title from a successful SongRec run', async () => {
     vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)  // ffprobe
       .mockImplementationOnce(() => makeClipMock() as any)
       .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
     const result = await (identifier as any).recognizeWithSongrec('./song.mp3')
@@ -235,10 +236,11 @@ describe('Identifier.recognizeWithSongrec', () => {
 
   it('calls songrec with audio-file-to-recognized-song and a temp wav path', async () => {
     vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)  // ffprobe
       .mockImplementationOnce(() => makeClipMock() as any)
       .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
     await (identifier as any).recognizeWithSongrec('./song.mp3')
-    const songrec = vi.mocked(spawn).mock.calls[1]
+    const songrec = vi.mocked(spawn).mock.calls[2]
     expect(songrec[0]).toBe('songrec')
     expect(songrec[1][0]).toBe('audio-file-to-recognized-song')
     expect(songrec[1][1]).toMatch(/\.wav$/)
@@ -247,14 +249,16 @@ describe('Identifier.recognizeWithSongrec', () => {
   it('uses custom songrecBin path when provided', async () => {
     identifier = new Identifier({ acoustidApiKey: 'key', songrecBin: '/usr/local/bin/songrec' })
     vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)  // ffprobe
       .mockImplementationOnce(() => makeClipMock() as any)
       .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
     await (identifier as any).recognizeWithSongrec('./song.mp3')
-    expect(vi.mocked(spawn).mock.calls[1][0]).toBe('/usr/local/bin/songrec')
+    expect(vi.mocked(spawn).mock.calls[2][0]).toBe('/usr/local/bin/songrec')
   })
 
   it('returns null when SongRec exits with non-zero code', async () => {
     vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)  // ffprobe
       .mockImplementationOnce(() => makeClipMock() as any)
       .mockImplementationOnce(() => makeSpawnMock('', 1) as any)
     const result = await (identifier as any).recognizeWithSongrec('./song.mp3')
@@ -264,6 +268,7 @@ describe('Identifier.recognizeWithSongrec', () => {
   it('returns null when Shazam JSON has no track field', async () => {
     const noTrack = JSON.stringify({ matches: [], tagid: 'abc' })
     vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)  // ffprobe
       .mockImplementationOnce(() => makeClipMock() as any)
       .mockImplementationOnce(() => makeSpawnMock(noTrack) as any)
     const result = await (identifier as any).recognizeWithSongrec('./song.mp3')
@@ -275,5 +280,42 @@ describe('Identifier.recognizeWithSongrec', () => {
     const result = await (identifier as any).recognizeWithSongrec('./song.mp3')
     expect(result).toBeNull()
     expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('passes -ss 0 to ffmpeg when audio is shorter than 15 seconds', async () => {
+    // ffprobe → 10s duration, ffmpeg clip, songrec
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('10.234', 0) as any)
+      .mockImplementationOnce(() => makeClipMock() as any)
+      .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
+    await (identifier as any).recognizeWithSongrec('./short-clip.mp3')
+    const ffmpegArgs = vi.mocked(spawn).mock.calls[1][1] as string[]
+    const ssIndex = ffmpegArgs.indexOf('-ss')
+    expect(ssIndex).toBeGreaterThan(-1)
+    expect(Number(ffmpegArgs[ssIndex + 1])).toBe(0)
+  })
+
+  it('passes -ss 60 to ffmpeg when audio is longer than 75 seconds', async () => {
+    // ffprobe → 300s duration, ffmpeg clip, songrec
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('300.0', 0) as any)
+      .mockImplementationOnce(() => makeClipMock() as any)
+      .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
+    await (identifier as any).recognizeWithSongrec('./full-song.mp3')
+    const ffmpegArgs = vi.mocked(spawn).mock.calls[1][1] as string[]
+    const ssIndex = ffmpegArgs.indexOf('-ss')
+    expect(Number(ffmpegArgs[ssIndex + 1])).toBe(60)
+  })
+
+  it('passes a proportional startSec for medium-length audio', async () => {
+    // 40s file → max(0, min(60, 40-15)) = 25
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => makeSpawnMock('40.0', 0) as any)
+      .mockImplementationOnce(() => makeClipMock() as any)
+      .mockImplementationOnce(() => makeSpawnMock(SHAZAM_SUCCESS) as any)
+    await (identifier as any).recognizeWithSongrec('./medium.mp3')
+    const ffmpegArgs = vi.mocked(spawn).mock.calls[1][1] as string[]
+    const ssIndex = ffmpegArgs.indexOf('-ss')
+    expect(Number(ffmpegArgs[ssIndex + 1])).toBe(25)
   })
 })

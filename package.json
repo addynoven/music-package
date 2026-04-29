@@ -1,7 +1,7 @@
 {
   "name": "musicstream-sdk",
   "version": "1.0.1",
-  "description": "Music SDK for search, streaming, browse, lyrics and download. Unified API across JioSaavn and YouTube Music. No API keys required.",
+  "description": "Unified music SDK for YouTube Music and JioSaavn — search, stream, lyrics, podcasts, download. No API keys required.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -26,11 +26,24 @@
     "play": "tsx playground/download-test.ts"
   },
   "keywords": [
-    "youtube",
+    "youtube-music",
+    "jiosaavn",
     "music",
     "sdk",
     "streaming",
-    "api"
+    "audio",
+    "search",
+    "lyrics",
+    "podcast",
+    "download",
+    "youtube",
+    "music-api",
+    "music-streaming",
+    "innertube",
+    "waveform",
+    "fingerprint",
+    "no-api-key",
+    "typescript"
   ],
   "author": "capitalcurv8",
   "license": "MIT",

@@ -451,6 +451,16 @@ export class MusicKit {
     return this.call('browse', () => this._discovery!.getCharts(options))
   }
 
+  async getMoodCategories(): Promise<{ title: string; params: string }[]> {
+    await this.ensureClients()
+    return this.call('browse', () => this._discovery!.getMoodCategories())
+  }
+
+  async getMoodPlaylists(params: string): Promise<Section[]> {
+    await this.ensureClients()
+    return this.call('browse', () => this._discovery!.getMoodPlaylists(params))
+  }
+
   async download(videoId: string, options?: DownloadOptions): Promise<void> {
     await this.ensureClients()
     let id = resolveInput(videoId)

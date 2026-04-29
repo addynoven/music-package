@@ -272,6 +272,39 @@ export class DiscoveryClient {
     }
   }
 
+  async getMoodCategories(): Promise<{ title: string; params: string }[]> {
+    try {
+      const res = await (this.yt.music as any).getExplore?.() ?? { sections: [] }
+      for (const section of res.sections ?? []) {
+        const title = extractText(section.header?.title) || extractText(section.title) || ''
+        if (!title.toLowerCase().includes('mood')) continue
+        return (section.contents ?? [])
+          .map((item: any) => ({
+            title: extractText(item.title) || '',
+            params: item.params ?? item.endpoint?.payload?.params ?? '',
+          }))
+          .filter((c: { title: string; params: string }) => c.title && c.params)
+      }
+      return []
+    } catch {
+      return []
+    }
+  }
+
+  async getMoodPlaylists(params: string): Promise<Section[]> {
+    try {
+      const res = await (this.yt.music as any).getExplore?.({ params }) ?? { sections: [] }
+      return (res.sections ?? [])
+        .map((s: any) => ({
+          title: extractText(s.title) || extractText(s.header?.title) || '',
+          items: (s.contents ?? []).map(mapPlaylistItem),
+        }))
+        .filter((s: Section) => !isEmptySection(s.title, s.items))
+    } catch {
+      return []
+    }
+  }
+
   async getCharts(options?: { country?: string }): Promise<Section[]> {
     const res = await (this.yt.music as any).getExplore?.(options) ?? { sections: [] }
     return (res.sections ?? res.contents ?? [])

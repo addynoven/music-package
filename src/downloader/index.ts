@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { StreamResolver } from '../stream'
 import { NetworkError } from '../errors'
+import { parseYtdlpProgress } from './ytdlp-progress'
 import type { DiscoveryClient } from '../discovery'
 import type { Song, DownloadProgress } from '../models'
 
@@ -22,7 +23,14 @@ function sanitize(name: string): string {
   return name.replace(INVALID_CHARS, '').trim()
 }
 
-function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat, cookiesPath?: string): Promise<void> {
+function ytdlpDownload(
+  videoId: string,
+  destFile: string,
+  format: DownloadFormat,
+  cookiesPath?: string,
+  filename?: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const cookiesArgs = cookiesPath ? ['--cookies', cookiesPath] : []
     const proc = spawn('yt-dlp', [
@@ -36,7 +44,16 @@ function ytdlpDownload(videoId: string, destFile: string, format: DownloadFormat
       `https://music.youtube.com/watch?v=${videoId}`,
     ])
     let err = ''
-    proc.stderr.on('data', (d: Buffer) => { err += d })
+    proc.stderr.on('data', (d: Buffer) => {
+      const text = d.toString()
+      err += text
+      if (onProgress && filename) {
+        for (const line of text.split('\n')) {
+          const parsed = parseYtdlpProgress(line)
+          if (parsed) onProgress({ ...parsed, filename })
+        }
+      }
+    })
     proc.on('error', (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)))
     proc.on('close', (code) => {
       if (code !== 0) reject(new Error(`yt-dlp download failed: ${err.slice(0, 200)}`))
@@ -138,7 +155,7 @@ export class Downloader {
       if (err.message?.includes('403') || err.message?.includes('audio fetch failed')) {
         const { unlink } = await import('node:fs/promises')
         await unlink(dest).catch(() => {})
-        await ytdlpDownload(videoId, dest, format, this.cookiesPath)
+        await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress)
       } else {
         throw err
       }

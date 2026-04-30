@@ -628,7 +628,79 @@ var DiscoveryClient = class {
 
 // src/stream/index.ts
 import { execFile } from "child_process";
+
+// src/stream/innertube-resolver.ts
+var PRIVATE_TRACK = "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK";
 function parseExpiry(url) {
+  try {
+    return parseInt(new URL(url).searchParams.get("expire") ?? "0", 10);
+  } catch {
+    return 0;
+  }
+}
+function buildStreamingData(url, format) {
+  const mime = format.mime_type ?? "";
+  const codec = mime.includes("opus") ? "opus" : "mp4a";
+  const data = {
+    url,
+    codec,
+    mimeType: mime || (codec === "opus" ? "audio/webm; codecs=opus" : "audio/mp4"),
+    bitrate: typeof format.bitrate === "number" ? format.bitrate : 0,
+    expiresAt: parseExpiry(url)
+  };
+  if (typeof format.loudness_db === "number") data.loudnessDb = format.loudness_db;
+  if (typeof format.content_length === "number") data.sizeBytes = format.content_length;
+  else if (typeof format.content_length === "string") {
+    const n = parseInt(format.content_length, 10);
+    if (!Number.isNaN(n)) data.sizeBytes = n;
+  }
+  return data;
+}
+async function resolveViaInnertube(yt, videoId, options) {
+  const clientUsed = options?.client ?? "YTMUSIC";
+  const qualityHint = options?.quality === "low" ? "medium" : "best";
+  let info;
+  try {
+    info = await yt.music.getInfo(videoId);
+  } catch (err) {
+    throw new StreamError(`InnerTube getInfo failed: ${err.message}`, videoId);
+  }
+  const playerResponse = info?.page?.[0];
+  const videoDetails = playerResponse?.videoDetails;
+  const videoType = typeof videoDetails?.musicVideoType === "string" ? videoDetails.musicVideoType : null;
+  const isPrivateTrack = videoType === PRIVATE_TRACK;
+  let format;
+  try {
+    format = info.chooseFormat({ type: "audio", quality: qualityHint, format: "opus" });
+  } catch {
+    try {
+      format = info.chooseFormat({ type: "audio", quality: qualityHint, format: "mp4a" });
+    } catch (err) {
+      throw new StreamError(
+        `chooseFormat failed for both opus and mp4a: ${err.message}`,
+        videoId
+      );
+    }
+  }
+  if (!format) {
+    throw new StreamError("chooseFormat returned no format", videoId);
+  }
+  let url;
+  try {
+    const player = yt?.session?.player;
+    url = await format.decipher(player);
+  } catch (err) {
+    throw new StreamError(`format.decipher failed: ${err.message}`, videoId);
+  }
+  if (!url) {
+    throw new StreamError("decipher returned empty url", videoId);
+  }
+  const stream = buildStreamingData(url, format);
+  return { stream, videoType, isPrivateTrack, clientUsed };
+}
+
+// src/stream/index.ts
+function parseExpiry2(url) {
   try {
     return parseInt(new URL(url).searchParams.get("expire") ?? "0", 10);
   } catch {
@@ -664,7 +736,7 @@ function ytdlpResolve(videoId, quality, cookiesPath, proxy) {
           codec,
           mimeType,
           bitrate: Math.round(bitrateKbps * 1e3),
-          expiresAt: parseExpiry(url),
+          expiresAt: parseExpiry2(url),
           ...sizeBytes != null && { sizeBytes },
           _meta: { title: json.title ?? "", artist: json.artist ?? json.uploader ?? "" }
         });
@@ -677,11 +749,24 @@ function ytdlpResolve(videoId, quality, cookiesPath, proxy) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, cookiesPath, proxy) {
+  constructor(cache, cookiesPath, proxy, yt, onFallback) {
     this.cache = cache;
     this.cookiesPath = cookiesPath;
     this.proxy = proxy;
+    this.yt = yt;
+    this.onFallback = onFallback;
   }
+  /**
+   * Resolves a stream URL.
+   *
+   * Chain (each step short-circuits on success):
+   *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
+   *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
+   *      Skipped if no Innertube instance was provided.
+   *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
+   *      unavailable or throws, or for tracks that genuinely can't be played
+   *      from InnerTube (geo-blocked, age-restricted, etc.).
+   */
   async resolve(videoId, quality = "high") {
     const raw = typeof quality === "string" ? quality : quality.quality ?? "high";
     const q = raw === "low" ? "low" : "high";
@@ -690,7 +775,19 @@ var StreamResolver = class {
     if (cached && !this.cache.isUrlExpired(cached.url)) {
       return cached;
     }
-    const data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy);
+    let data;
+    if (this.yt) {
+      try {
+        const result = await resolveViaInnertube(this.yt, videoId, { quality: q });
+        data = result.stream;
+      } catch (err) {
+        const reason = err.message;
+        this.onFallback?.(videoId, reason);
+      }
+    }
+    if (!data) {
+      data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy);
+    }
     this.cache.set(cacheKey, data, Cache.TTL.STREAM);
     return data;
   }
@@ -1342,7 +1439,7 @@ function parseLrc(lrc) {
       WORD_TAG_RE.lastIndex = 0;
       while ((m = WORD_TAG_RE.exec(raw)) !== null) {
         const wordText = m[3].trim();
-        if (wordText) words.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: wordText });
+        if (wordText) words.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), duration: 0, text: wordText });
       }
       if (words.length > 0) {
         lines.push({ time, text: words.map((w) => w.text).join(" "), words });
@@ -1443,6 +1540,205 @@ async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
   } catch {
     return null;
   }
+}
+
+// src/lyrics/better-lyrics.ts
+var BETTER_LYRICS_BASE = "https://lyrics-api.boidu.dev";
+function parseTime(raw) {
+  const s = raw.trim();
+  if (s.includes(":")) {
+    const parts = s.split(":");
+    if (parts.length === 2) {
+      return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    }
+    if (parts.length === 3) {
+      return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+    }
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function getAttr(tag, name) {
+  const re = new RegExp(`\\b${name}=["']([^"']*)["']`, "i");
+  const m = re.exec(tag);
+  return m ? m[1] : null;
+}
+function decodeEntities(s) {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
+function innerText(content) {
+  return decodeEntities(content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+}
+function parseTtml(ttml) {
+  const xml = ttml.replace(/\r\n?/g, "\n");
+  const pRe = /<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+  const lines = [];
+  let pMatch;
+  while ((pMatch = pRe.exec(xml)) !== null) {
+    const pAttrs = pMatch[1];
+    const pBody = pMatch[2];
+    const beginRaw = getAttr(pAttrs, "begin");
+    if (beginRaw === null) continue;
+    const lineTime = parseTime(beginRaw);
+    const spanRe = /<span\b([^>]*)>([\s\S]*?)<\/span>/gi;
+    const words = [];
+    let spanMatch;
+    while ((spanMatch = spanRe.exec(pBody)) !== null) {
+      const spanAttrs = spanMatch[1];
+      const spanContent = spanMatch[2];
+      const sBeginRaw = getAttr(spanAttrs, "begin");
+      const sEndRaw = getAttr(spanAttrs, "end");
+      const wordText = innerText(spanContent);
+      if (sBeginRaw !== null && sEndRaw !== null && wordText.length > 0) {
+        const sBegin = parseTime(sBeginRaw);
+        const sEnd = parseTime(sEndRaw);
+        words.push({
+          time: sBegin,
+          duration: Math.max(0, sEnd - sBegin),
+          text: wordText
+        });
+      }
+    }
+    const text = words.length > 0 ? words.map((w) => w.text).join(" ") : innerText(pBody);
+    if (text.length === 0) continue;
+    const line = { time: lineTime, text };
+    if (words.length > 0) line.words = words;
+    lines.push(line);
+  }
+  return lines.length > 0 ? lines : null;
+}
+async function fetchFromBetterLyrics(artist, title, duration, fetchFn = globalThis.fetch) {
+  try {
+    const params = new URLSearchParams({ s: title, a: artist });
+    if (duration !== void 0 && duration > 0) params.set("d", String(Math.round(duration)));
+    const url = `${BETTER_LYRICS_BASE}/getLyrics?${params}`;
+    const res = await fetchFn(url, {
+      headers: { Accept: "application/xml, text/xml, */*" }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ttml = typeof data["ttml"] === "string" ? data["ttml"] : null;
+    if (!ttml) return null;
+    const synced = parseTtml(ttml);
+    const plain = synced ? synced.map((l) => l.text).join("\n") : "";
+    if (!plain) return null;
+    return { plain, synced };
+  } catch {
+    return null;
+  }
+}
+
+// src/lyrics/kugou.ts
+var KUGOU_SEARCH_BASE = "https://mobileservice.kugou.com";
+var KUGOU_LYRICS_BASE = "https://lyrics.kugou.com";
+var TIMESTAMP_RE = /\[(\d+):(\d+\.\d+)\]/g;
+function parseTimestamp(mm, ss) {
+  return parseInt(mm, 10) * 60 + parseFloat(ss);
+}
+function parseLrc2(lrc) {
+  const lines = [];
+  for (const rawLine of lrc.split("\n")) {
+    const timestamps = [];
+    let lastIndex = 0;
+    TIMESTAMP_RE.lastIndex = 0;
+    let m;
+    while ((m = TIMESTAMP_RE.exec(rawLine)) !== null) {
+      timestamps.push(parseTimestamp(m[1], m[2]));
+      lastIndex = TIMESTAMP_RE.lastIndex;
+    }
+    if (timestamps.length === 0) continue;
+    const text = rawLine.slice(lastIndex).trim();
+    if (!text) continue;
+    for (const time of timestamps) {
+      lines.push({ time, text });
+    }
+  }
+  return lines.sort((a, b) => a.time - b.time);
+}
+async function fetchFromKuGou(artist, title, duration, fetchFn = globalThis.fetch) {
+  try {
+    const keyword = encodeURIComponent(`${artist} ${title}`);
+    const searchUrl = `${KUGOU_SEARCH_BASE}/api/v3/search/song?keyword=${keyword}&pagesize=20&page=1`;
+    const searchRes = await fetchFn(searchUrl);
+    if (!searchRes.ok) return null;
+    const searchData = await searchRes.json();
+    const songs = getSongs(searchData);
+    if (songs.length === 0) return null;
+    let chosen;
+    if (duration !== void 0) {
+      const TOLERANCE = 5;
+      const candidates = songs.filter((s) => Math.abs(s.duration - duration) <= TOLERANCE);
+      if (candidates.length === 0) return null;
+      chosen = candidates.reduce(
+        (best, s) => Math.abs(s.duration - duration) < Math.abs(best.duration - duration) ? s : best
+      );
+    } else {
+      chosen = songs[0];
+    }
+    if (!chosen) return null;
+    const durationMs = duration !== void 0 ? Math.round(duration * 1e3) : void 0;
+    const lyricSearchParams = new URLSearchParams({
+      ver: "1",
+      man: "yes",
+      client: "mobi",
+      keyword: title,
+      hash: chosen.hash
+    });
+    if (durationMs !== void 0) {
+      lyricSearchParams.set("duration", String(durationMs));
+    }
+    const lyricSearchRes = await fetchFn(`${KUGOU_LYRICS_BASE}/search?${lyricSearchParams}`);
+    if (!lyricSearchRes.ok) return null;
+    const lyricSearchData = await lyricSearchRes.json();
+    const candidate = getFirstCandidate(lyricSearchData);
+    if (!candidate) return null;
+    const downloadParams = new URLSearchParams({
+      ver: "1",
+      client: "pc",
+      id: String(candidate.id),
+      accesskey: candidate.accesskey,
+      fmt: "lrc",
+      charset: "utf8"
+    });
+    const downloadRes = await fetchFn(`${KUGOU_LYRICS_BASE}/download?${downloadParams}`);
+    if (!downloadRes.ok) return null;
+    const downloadData = await downloadRes.json();
+    const b64 = getContent(downloadData);
+    if (!b64) return null;
+    const lrcText = Buffer.from(b64, "base64").toString("utf8");
+    const synced = parseLrc2(lrcText);
+    if (synced.length === 0) return null;
+    const plain = synced.map((l) => l.text).join("\n");
+    return { plain, synced };
+  } catch {
+    return null;
+  }
+}
+function getSongs(data) {
+  if (typeof data !== "object" || data === null || !("data" in data)) return [];
+  const d = data.data;
+  if (typeof d !== "object" || d === null || !("info" in d)) return [];
+  const info = d.info;
+  if (!Array.isArray(info)) return [];
+  return info.filter(
+    (item) => typeof item === "object" && item !== null && typeof item.hash === "string" && typeof item.duration === "number"
+  );
+}
+function getFirstCandidate(data) {
+  if (typeof data !== "object" || data === null || !("candidates" in data)) return null;
+  const candidates = data.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const first = candidates[0];
+  if (typeof first !== "object" || first === null || !("id" in first) || !("accesskey" in first)) return null;
+  const f = first;
+  if (typeof f.id !== "string" && typeof f.id !== "number" || typeof f.accesskey !== "string") return null;
+  return { id: f.id, accesskey: f.accesskey };
+}
+function getContent(data) {
+  if (typeof data !== "object" || data === null || !("content" in data)) return null;
+  const content = data.content;
+  if (typeof content !== "string" || content.length === 0) return null;
+  return content;
 }
 
 // src/utils/url-resolver.ts
@@ -1644,6 +1940,11 @@ var _MusicKit = class _MusicKit {
     this._identifier = null;
     this._podcast = null;
     this._ytPromise = null;
+    // Bound so it can be passed by reference to StreamResolver without losing `this`.
+    this.onStreamFallback = (videoId, reason) => {
+      this.log.debug(`[stream] InnerTube fast-path failed for ${videoId}, falling back to yt-dlp: ${reason}`);
+      this.emitter.emit("retry", "stream", 1, `innertube\u2192ytdlp: ${reason}`);
+    };
     this.config = config;
     this.sourceOrder = resolveSourceOrder(config.sourceOrder);
     const cacheConfig = config.cache ?? {};
@@ -1669,7 +1970,7 @@ var _MusicKit = class _MusicKit {
     this.innerTubeFetch = config.proxy ? makeFetch({ proxy: config.proxy }) : void 0;
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
-      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy);
+      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, _yt, this.onStreamFallback);
       this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath, config.proxy);
     }
     if (!config.youtubeApiKey && !config.cookiesPath) {
@@ -1704,7 +2005,7 @@ var _MusicKit = class _MusicKit {
       ...config.location ? { location: config.location } : {}
     });
     instance._discovery = new DiscoveryClient(yt);
-    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy);
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, yt, instance.onStreamFallback);
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy);
     return instance;
   }
@@ -1761,7 +2062,7 @@ var _MusicKit = class _MusicKit {
       }
       const yt = await this._ytPromise;
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy);
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, yt, this.onStreamFallback);
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy);
     }
     if (this.sources.length === 0) {
@@ -1977,7 +2278,7 @@ var _MusicKit = class _MusicKit {
       const meta = await this.getMetadata(resolved);
       const artist = sanitizeArtist(meta.artist);
       const title = sanitizeTitle(meta.title);
-      lyrics = await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch);
+      lyrics = await fetchFromBetterLyrics(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch) ?? await fetchFromKuGou(artist, title, meta.duration, this.sharedFetch);
     } catch {
     }
     if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS);
@@ -2148,7 +2449,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "4.0.0";
+var version = "4.1.0";
 
 // src/models/index.ts
 var SearchFilter = {

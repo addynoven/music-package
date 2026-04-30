@@ -80,10 +80,15 @@ interface LyricWord {
     time: number;
     text: string;
 }
+interface WordTime {
+    time: number;
+    duration: number;
+    text: string;
+}
 interface LyricLine {
     time: number;
     text: string;
-    words?: LyricWord[];
+    words?: WordTime[];
 }
 interface Lyrics {
     plain: string;
@@ -285,6 +290,7 @@ declare class MusicKit {
     private pickSearchSource;
     private tryEachSource;
     private ensureClients;
+    private readonly onStreamFallback;
     private call;
     on(event: EventName, handler: EventHandler<typeof event>): void;
     off(event: EventName, handler: EventHandler<typeof event>): void;
@@ -481,7 +487,20 @@ declare class StreamResolver {
     private readonly cache;
     private readonly cookiesPath?;
     private readonly proxy?;
-    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined);
+    private readonly yt?;
+    private readonly onFallback?;
+    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined, yt?: Innertube | undefined, onFallback?: ((videoId: string, reason: string) => void) | undefined);
+    /**
+     * Resolves a stream URL.
+     *
+     * Chain (each step short-circuits on success):
+     *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
+     *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
+     *      Skipped if no Innertube instance was provided.
+     *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
+     *      unavailable or throws, or for tracks that genuinely can't be played
+     *      from InnerTube (geo-blocked, age-restricted, etc.).
+     */
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
         quality?: Quality;
@@ -570,7 +589,7 @@ declare class Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-var version = "4.0.0";
+var version = "4.1.0";
 
 /**
  * Returns the thumbnail whose width is closest to targetSize.
@@ -672,4 +691,10 @@ declare function safeParseAlbum(data: unknown): Album | null;
 declare function safeParseArtist(data: unknown): Artist | null;
 declare function safeParsePlaylist(data: unknown): Playlist | null;
 
-export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };
+type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou';
+interface LyricsProvider {
+    readonly name: LyricsProviderName;
+    fetch(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
+}
+
+export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };

@@ -13,6 +13,8 @@ import { YouTubeMusicSource } from '../sources/youtube-music'
 import { YouTubeDataAPISource } from '../sources/youtube-data-api'
 import { fetchFromLrclib } from '../lyrics/lrclib'
 import { fetchFromLyricsOvh } from '../lyrics/lyrics-ovh'
+import { fetchFromBetterLyrics } from '../lyrics/better-lyrics'
+import { fetchFromKuGou } from '../lyrics/kugou'
 import { resolveInput } from '../utils/url-resolver'
 import { readCookieHeader } from '../utils/cookies'
 import { makeFetch } from '../utils/fetch'
@@ -132,7 +134,7 @@ export class MusicKit {
 
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt)
-      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy)
+      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, _yt, this.onStreamFallback)
       this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath, config.proxy)
     }
 
@@ -156,7 +158,7 @@ export class MusicKit {
       ...(config.location ? { location: config.location } : {}),
     })
     instance._discovery = new DiscoveryClient(yt)
-    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy)
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, yt, instance.onStreamFallback)
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy)
     return instance
   }
@@ -224,7 +226,7 @@ export class MusicKit {
       }
       const yt = await this._ytPromise
       this._discovery = new DiscoveryClient(yt)
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy)
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, yt, this.onStreamFallback)
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy)
     }
     if (this.sources.length === 0) {
@@ -239,6 +241,12 @@ export class MusicKit {
         }
       }
     }
+  }
+
+  // Bound so it can be passed by reference to StreamResolver without losing `this`.
+  private readonly onStreamFallback = (videoId: string, reason: string): void => {
+    this.log.debug(`[stream] InnerTube fast-path failed for ${videoId}, falling back to yt-dlp: ${reason}`)
+    this.emitter.emit('retry', 'stream', 1, `innertube→ytdlp: ${reason}`)
   }
 
   private async call<T>(endpoint: string, fn: () => Promise<T>): Promise<T> {
@@ -471,7 +479,16 @@ export class MusicKit {
       const meta = await this.getMetadata(resolved)
       const artist = sanitizeArtist(meta.artist)
       const title = sanitizeTitle(meta.title)
-      lyrics = await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch)
+      // Provider chain — first non-null wins.
+      // BetterLyrics first: only source of real per-word timings (Apple Music TTML).
+      // LRCLIB second: best line-level coverage for English/global music.
+      // lyrics.ovh third: plain-text fallback when synced is unavailable.
+      // KuGou last: covers Chinese music where the others have ~zero hits.
+      lyrics =
+        await fetchFromBetterLyrics(artist, title, meta.duration, this.sharedFetch)
+        ?? await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch)
+        ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch)
+        ?? await fetchFromKuGou(artist, title, meta.duration, this.sharedFetch)
     } catch {
       // ignore — return null below
     }

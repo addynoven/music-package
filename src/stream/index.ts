@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process'
+import type { Innertube } from 'youtubei.js'
 import { Cache } from '../cache'
 import { StreamError } from '../errors'
 import type { StreamingData, Quality } from '../models'
+import { resolveViaInnertube } from './innertube-resolver'
 
 function parseExpiry(url: string): number {
   try {
@@ -60,8 +62,21 @@ export class StreamResolver {
     private readonly cache: Cache,
     private readonly cookiesPath?: string,
     private readonly proxy?: string,
+    private readonly yt?: Innertube,
+    private readonly onFallback?: (videoId: string, reason: string) => void,
   ) {}
 
+  /**
+   * Resolves a stream URL.
+   *
+   * Chain (each step short-circuits on success):
+   *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
+   *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
+   *      Skipped if no Innertube instance was provided.
+   *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
+   *      unavailable or throws, or for tracks that genuinely can't be played
+   *      from InnerTube (geo-blocked, age-restricted, etc.).
+   */
   async resolve(videoId: string, quality: Quality | { codec?: string; quality?: Quality } = 'high'): Promise<StreamingData> {
     const raw: string = typeof quality === 'string' ? quality : (quality.quality ?? 'high')
     const q: Quality = raw === 'low' ? 'low' : 'high'
@@ -72,7 +87,21 @@ export class StreamResolver {
       return cached
     }
 
-    const data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy)
+    let data: StreamingData | undefined
+
+    if (this.yt) {
+      try {
+        const result = await resolveViaInnertube(this.yt, videoId, { quality: q })
+        data = result.stream
+      } catch (err) {
+        const reason = (err as Error).message
+        this.onFallback?.(videoId, reason)
+      }
+    }
+
+    if (!data) {
+      data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy)
+    }
 
     this.cache.set(cacheKey, data, Cache.TTL.STREAM)
     return data

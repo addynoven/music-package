@@ -5,6 +5,43 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.1.0] — 2026-04-30
+
+Stream resolution and lyrics get teeth. The "4-step waterfall" CLAUDE.md described in v4 was aspirational — the actual `StreamResolver` was a single yt-dlp shell-out. v4.1 implements the real chain. Lyrics gets a proper provider chain with genuine per-word timings.
+
+**No breaking API changes.** Public types and method signatures unchanged. `LyricLine` gains an optional `words?: WordTime[]` field — additive only.
+
+### Added — stream resolver actually has a fast path
+
+- **InnerTube fast-path** (`src/stream/innertube-resolver.ts`) — `StreamResolver.resolve()` now tries `yt.music.getInfo` + `chooseFormat` + `decipher` *before* falling back to yt-dlp. Steady-state stream calls are ~1.5-2s instead of the previous ~2.4s yt-dlp shell-out. yt-dlp remains the final fallback for cipher failures, geo blocks, age gates, and any track InnerTube can't return.
+- **`videoDetails.musicVideoType` exposure** — the field youtubei.js silently drops (only 17 fields parsed) is now read from the raw `info.page[0]` and surfaced as `videoType` and `isPrivateTrack` on `InnertubeResolveResult`. `MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK` is detected so future work can skip HEAD validation for user-uploaded library tracks.
+- **`onFallback` event hook** — `StreamResolver` accepts an optional callback that fires when InnerTube fails and yt-dlp takes over. `MusicKit` wires it to emit a `'retry'` event with endpoint `'stream'` for observability.
+- **`src/stream/multi-client.ts`** — `tryClients()` helper and `STREAM_CLIENT_FALLBACK_ORDER` constant. Not yet wired into the default resolver (youtubei.js binds a single client at session creation), but available for consumers and v4.2.0 work.
+
+### Added — lyrics provider chain
+
+- **BetterLyrics** (`src/lyrics/better-lyrics.ts`) — fetches Apple Music TTML from `lyrics-api.boidu.dev` and parses real per-word `<span begin end>` timestamps. Echo Music fetches this provider but discards the word data; we surface it.
+- **KuGou** (`src/lyrics/kugou.ts`) — Chinese music coverage via `mobileservice.kugou.com` + `lyrics.kugou.com`. Three-step flow: song search → lyric candidate by hash → base64-encoded LRC. Handles multi-timestamp LRC lines (`[00:01.00][00:30.00]text`).
+- **`LyricsProvider` interface** (`src/lyrics/provider.ts`) — uniform contract `{ name, fetch(artist, title, duration?, fetchFn?) }`. Existing providers expose `lrclibProvider` and `lyricsOvhProvider` conforming exports alongside their original function exports (no breaking change).
+- **`WordTime` type** + optional `LyricLine.words` field — additive type extension, public via the SDK barrel.
+- `MusicKit.getLyrics()` chain: BetterLyrics → LRCLIB → lyrics.ovh → KuGou. First non-null wins. 10-year cache TTL unchanged.
+
+### Fixed — documentation lie
+
+- `CLAUDE.md` previously described a 4-step stream resolution chain (pre-signed → cached → decipher → yt-dlp) that did not exist in the code. The chain now exists and the doc reflects reality.
+
+### Internal
+
+- `src/musickit/index.ts` — three `new StreamResolver(...)` construction sites now pass the `Innertube` instance and an `onStreamFallback` callback bound on MusicKit.
+- New playground assets and unit tests for the new modules — 64 new unit tests added (29 multi-client, 13 InnerTube resolver, 12 BetterLyrics, 10 KuGou).
+- Live integration tests pass against real YouTube Music — `getStream` works through the InnerTube path with high+low quality, fallback paths preserved.
+
+### Migration
+
+None required. If you import `LyricLine` and exhaustively destructure its fields, the optional `words` will simply be `undefined` for providers that don't supply per-word timing — same behavior as before.
+
+---
+
 ## [4.0.0] — 2026-04-30
 
 Major hardening pass. Many config fields that were previously declared but not wired now actually take effect. Source routing, anti-ban headers, lyrics matching, and rate limiting all properly honor user configuration.

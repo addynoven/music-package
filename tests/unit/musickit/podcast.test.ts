@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MusicKit } from '../../../src/musickit'
 
-vi.mock('youtubei.js', () => ({ Innertube: { create: vi.fn().mockResolvedValue({}) } }))
+vi.mock('youtubei.js', () => ({
+  Innertube: { create: vi.fn().mockResolvedValue({}) },
+  ClientType: {
+    WEB: 'WEB', MWEB: 'MWEB', KIDS: 'WEB_KIDS', MUSIC: 'WEB_REMIX',
+    IOS: 'iOS', ANDROID: 'ANDROID', ANDROID_VR: 'ANDROID_VR',
+    ANDROID_MUSIC: 'ANDROID_MUSIC', ANDROID_CREATOR: 'ANDROID_CREATOR',
+    TV: 'TVHTML5', TV_SIMPLY: 'TVHTML5_SIMPLY',
+    TV_EMBEDDED: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+    WEB_EMBEDDED: 'WEB_EMBEDDED_PLAYER', WEB_CREATOR: 'WEB_CREATOR',
+  },
+}))
 vi.mock('youtubei.js/agnostic', () => ({ Platform: { shim: null, load: vi.fn() } }))
 vi.mock('../../../src/discovery')
 vi.mock('../../../src/stream')

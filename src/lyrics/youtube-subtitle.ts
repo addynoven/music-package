@@ -1,10 +1,6 @@
 import type { Innertube } from 'youtubei.js'
-import type { Lyrics, LyricLine } from '../models/index.js'
-// NOTE: LyricsProviderName does not yet include 'youtube-subtitle'.
-// Wave 2 must add it to the union in src/lyrics/provider.ts.
-// We cast via `as unknown as LyricsProviderName` to keep the class compilable
-// without modifying existing files in this wave.
-import type { LyricsProvider, LyricsProviderName } from './provider.js'
+import type { Lyrics, LyricLine } from '../models'
+import type { LyricsProvider, LyricsProviderName } from './provider'
 
 /**
  * Regex to filter out non-lyric segments from YouTube auto-captions.
@@ -34,18 +30,9 @@ function toCleanText(raw: string): string | null {
  * provider fails.
  *
  * Requires a `videoId` — without one the provider immediately returns null.
- *
- * Wave 2 integration checklist (DO NOT DO THIS IN WAVE 1 — edit existing files):
- *  1. Add 'youtube-subtitle' to LyricsProviderName union in src/lyrics/provider.ts
- *  2. Export YouTubeSubtitleLyricsProvider from src/index.ts
- *  3. Instantiate in MusicKit.ensureClients() with the yt Innertube instance
- *  4. Push to getLyrics provider chain last, passing the resolved videoId
  */
 export class YouTubeSubtitleLyricsProvider implements LyricsProvider {
-  // Cast needed because 'youtube-subtitle' is not yet in the LyricsProviderName
-  // union — Wave 2 will add it. The `as unknown as` double-cast is intentional
-  // and documented.
-  readonly name = 'youtube-subtitle' as unknown as LyricsProviderName
+  readonly name: LyricsProviderName = 'youtube-subtitle'
 
   constructor(private readonly yt: Innertube) {}
 

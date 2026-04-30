@@ -90,9 +90,11 @@ interface LyricLine {
     text: string;
     words?: WordTime[];
 }
+type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou' | 'simpmusic' | 'youtube-native' | 'youtube-subtitle';
 interface Lyrics {
     plain: string;
     synced: LyricLine[] | null;
+    source?: LyricsProviderName;
 }
 interface StreamingData {
     url: string;
@@ -163,6 +165,25 @@ interface CacheConfig {
 }
 type SourceName = 'youtube';
 type SourcePreference = 'best' | SourceName[];
+/** Spec entry: built-in name string OR a custom LyricsProvider implementation. */
+type LyricsProviderSpec = LyricsProviderName | {
+    name: LyricsProviderName;
+    fetch: (...args: unknown[]) => Promise<Lyrics | null>;
+};
+interface LyricsConfig {
+    /**
+     * Override the default lyrics provider chain.
+     *
+     * Pass an array of built-in provider names in your preferred order, or
+     * mix in custom `LyricsProvider` instances. Omitted providers are
+     * disabled.
+     *
+     * Default order (when undefined):
+     *   ['better-lyrics', 'lrclib', 'simpmusic', 'youtube-native',
+     *    'kugou', 'lyrics-ovh', 'youtube-subtitle']
+     */
+    providers?: LyricsProviderSpec[];
+}
 interface MusicKitConfig {
     logLevel?: LogLevel;
     logHandler?: (level: LogLevel, message: string, meta?: Record<string, unknown>) => void;
@@ -184,6 +205,24 @@ interface MusicKitConfig {
         acoustidApiKey: string;
         songrecBin?: string;
     };
+    /**
+     * Static PoToken passed to every InnerTube client that needs one.
+     * Most content streams without a PoToken via ANDROID_VR; web clients
+     * increasingly require one. Provide either a static token or a
+     * `getPoToken` callback. If both are set, `getPoToken` wins.
+     */
+    poToken?: string;
+    /**
+     * Async PoToken generator — called per (videoId, client) when a
+     * PoToken is needed. Return null to skip PoToken for that call.
+     * Use this when your PoToken comes from an external service or a
+     * puppeteer-based generator.
+     */
+    getPoToken?: (videoId: string, client: string) => Promise<string | null>;
+    /**
+     * Lyrics provider chain configuration. See `LyricsConfig`.
+     */
+    lyrics?: LyricsConfig;
 }
 interface MusicKitRequest {
     method: string;
@@ -235,6 +274,47 @@ interface Podcast {
     episodes: PodcastEpisode[];
 }
 
+interface LyricsProvider {
+    readonly name: LyricsProviderName;
+    fetch(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch, videoId?: string): Promise<Lyrics | null>;
+}
+
+/**
+ * Where to insert a provider when registering at runtime.
+ *   'first'           — insert at the start of the chain (highest priority)
+ *   'last' (default)  — append at the end
+ *   'before:<name>'   — insert immediately before the given provider name
+ *   'after:<name>'    — insert immediately after the given provider name
+ */
+type RegistryPosition = 'first' | 'last' | `before:${LyricsProviderName}` | `after:${LyricsProviderName}`;
+declare class LyricsRegistry {
+    private providers;
+    constructor(initial?: LyricsProvider[]);
+    /** Returns the providers in their current order. */
+    list(): LyricsProvider[];
+    /** Returns the names of registered providers in order. */
+    names(): LyricsProviderName[];
+    /** Returns the named provider or undefined. */
+    get(name: LyricsProviderName): LyricsProvider | undefined;
+    /**
+     * Adds a provider at the given position. If a provider with the same name is
+     * already registered, it is removed first (re-register replaces).
+     * Throws if position references an unknown provider name.
+     */
+    register(provider: LyricsProvider, position?: RegistryPosition): void;
+    /** Removes a provider by name. Returns true if it was registered. */
+    unregister(name: LyricsProviderName): boolean;
+    /**
+     * Replaces the entire chain. Useful for config-driven setup.
+     * Each entry can be:
+     *  - A LyricsProvider instance, OR
+     *  - A LyricsProviderName referencing a built-in (looked up via the
+     *    `builtins` map passed in)
+     * Unknown name strings throw a ValidationError.
+     */
+    replace(spec: ReadonlyArray<LyricsProvider | LyricsProviderName>, builtins: ReadonlyMap<LyricsProviderName, LyricsProvider>): void;
+}
+
 interface AudioSource {
     readonly name: string;
     canHandle(query: string): boolean;
@@ -282,10 +362,22 @@ declare class MusicKit {
     private _downloader;
     private _identifier;
     private _podcast;
-    private _ytPromise;
-    constructor(config?: MusicKitConfig, _yt?: Innertube);
+    private _poolPromise;
+    private _lyrics;
+    constructor(config?: MusicKitConfig, _yt?: unknown);
     static create(config?: MusicKitConfig): Promise<MusicKit>;
     registerSource(source: AudioSource): void;
+    /**
+     * Adds a custom or built-in `LyricsProvider` to the active lyrics chain.
+     * Has no effect if `ensureClients()` hasn't run yet — call after the first
+     * SDK method, or instantiate with `MusicKit.create()` so the registry is
+     * eagerly initialised.
+     *
+     *   mk.registerLyricsProvider(myGeniusProvider)              // append
+     *   mk.registerLyricsProvider(myProvider, 'first')           // prepend
+     *   mk.registerLyricsProvider(myProvider, 'before:lrclib')   // ordered insert
+     */
+    registerLyricsProvider(provider: LyricsProvider, position?: RegistryPosition): void;
     private sourceFor;
     private pickSearchSource;
     private tryEachSource;
@@ -336,7 +428,42 @@ declare class MusicKit {
     getRelated(videoId: string): Promise<Song[]>;
     getSuggestions(id: string): Promise<Song[]>;
     getMetadata(id: string): Promise<Song>;
-    getLyrics(id: string): Promise<Lyrics | null>;
+    /**
+     * Fetches lyrics for a song.
+     *
+     * Walks the configured provider chain in order; the first non-null result
+     * wins. Pass `options.providers` to override the chain for this call only
+     * (built-in name strings or custom `LyricsProvider` instances).
+     *
+     *   mk.getLyrics('dQw4w9WgXcQ')
+     *   mk.getLyrics(id, { providers: ['lrclib', 'kugou'] })  // synced-only
+     *
+     * The returned `Lyrics.source` field reports which provider produced the
+     * result.
+     */
+    getLyrics(id: string, options?: {
+        providers?: LyricsProviderSpec[];
+    }): Promise<Lyrics | null>;
+    /** Built-in providers map — keyed by name. YT-backed providers are bound to `yt`. */
+    private builtinLyricsProviders;
+    /**
+     * Default chain — synced-with-words first, plain-only fallbacks later,
+     * auto-captions last. Region-specific providers (KuGou for Chinese music)
+     * sit mid-chain so they don't dominate but also don't get drowned by
+     * lyrics.ovh's plain-only fallback.
+     */
+    private defaultLyricsChain;
+    private buildLyricsRegistry;
+    /** Resolves a mixed name/instance spec to concrete LyricsProvider instances. */
+    private specToProviders;
+    /**
+     * Returns the builtins map currently bound to the active registry's
+     * `yt` instance. If the registry hasn't been initialised yet (`_lyrics`
+     * is null), returns a map of providers that don't need `yt` only —
+     * the YT-backed ones are omitted, and resolving a YT name string in that
+     * window will throw a clear error.
+     */
+    private activeBuiltins;
     getCharts(options?: BrowseOptions): Promise<Section[]>;
     getMoodCategories(): Promise<{
         title: string;
@@ -483,23 +610,91 @@ declare class DiscoveryClient {
     }): Promise<Section[]>;
 }
 
+type StreamClient = 'YTMUSIC' | 'ANDROID_VR' | 'TVHTML5' | 'WEB_REMIX';
+
+interface InnertubePoolOptions {
+    /** Fetch override (proxy + session headers) — same one passed to existing Innertube.create */
+    fetch?: typeof globalThis.fetch;
+    /** Cookie header string for authenticated sessions */
+    cookie?: string;
+    /** Locale */
+    lang?: string;
+    /** Country */
+    location?: string;
+    /**
+     * Static PoToken — NOT passed at session-create time (Innertube doesn't accept it
+     * there in a meaningful way for per-request use). Stored here for caller retrieval;
+     * the resolver passes it per-call.
+     */
+    poToken?: string;
+    /**
+     * Async PoToken generator — called per (videoId, client) when poToken is needed.
+     * NOT passed at session-create time; resolver passes it per-call.
+     */
+    getPoToken?: (videoId: string, client: StreamClient) => Promise<string | null>;
+}
+/**
+ * Lazy pool of `Innertube` instances keyed by client type. Each client is
+ * created on first use and cached for the pool's lifetime.
+ *
+ * @example
+ * ```ts
+ * const pool = new InnertubePool({ lang: 'en', location: 'US' })
+ * const yt = await pool.get('ANDROID_VR')   // created + cached
+ * await pool.get('ANDROID_VR')              // returns same instance (no second create)
+ * pool.has('TVHTML5')                        // false — not loaded yet
+ * pool.clients()                             // ['ANDROID_VR']
+ * await pool.close()                         // clears the cache
+ * ```
+ *
+ * PoToken note: `poToken` / `getPoToken` in options are NOT passed to
+ * `Innertube.create`. They are stored for callers to retrieve and pass
+ * per-request (e.g. via `resolveViaInnertube`). Different clients have
+ * different PoToken requirements; ANDROID_VR notably does not need one.
+ */
+declare class InnertubePool {
+    private readonly options;
+    private readonly cache;
+    constructor(options?: InnertubePoolOptions);
+    /**
+     * Returns a cached `Innertube` instance for the given client, creating one
+     * on first use. Concurrent calls for the same client share one in-flight
+     * `Innertube.create` promise.
+     */
+    get(client: StreamClient): Promise<Innertube>;
+    /**
+     * Returns `true` if a (resolved or pending) entry exists for the given client.
+     */
+    has(client: StreamClient): boolean;
+    /**
+     * Returns the list of client types that have been loaded (resolved or pending).
+     */
+    clients(): StreamClient[];
+    /**
+     * Clears the pool. Subsequent `get` calls will re-create instances.
+     * Returns a Promise for symmetry with potential future async cleanup.
+     */
+    close(): Promise<void>;
+}
+
 declare class StreamResolver {
     private readonly cache;
     private readonly cookiesPath?;
     private readonly proxy?;
-    private readonly yt?;
+    private readonly pool?;
     private readonly onFallback?;
-    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined, yt?: Innertube | undefined, onFallback?: ((videoId: string, reason: string) => void) | undefined);
+    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined, pool?: InnertubePool | undefined, onFallback?: ((videoId: string, reason: string) => void) | undefined);
     /**
      * Resolves a stream URL.
      *
      * Chain (each step short-circuits on success):
      *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
-     *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
-     *      Skipped if no Innertube instance was provided.
+     *   2. InnerTube fast-path via `tryClients` walking `STREAM_CLIENT_FALLBACK_ORDER`.
+     *      Each client is fetched from the pool then passed to `resolveViaInnertube`.
+     *      Skipped if no InnertubePool was provided.
      *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
-     *      unavailable or throws, or for tracks that genuinely can't be played
-     *      from InnerTube (geo-blocked, age-restricted, etc.).
+     *      unavailable or all clients failed, or for tracks that genuinely can't
+     *      be played from InnerTube (geo-blocked, age-restricted, etc.).
      */
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
@@ -589,7 +784,7 @@ declare class Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-var version = "4.1.0";
+var version = "4.2.0";
 
 /**
  * Returns the thumbnail whose width is closest to targetSize.
@@ -632,12 +827,6 @@ declare function formatTimestamp(seconds: number): string;
 declare function offsetLrc(lines: LyricLine[], offsetMs: number): LyricLine[];
 declare function serializeLrc(lines: LyricLine[]): string;
 
-type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou';
-interface LyricsProvider {
-    readonly name: LyricsProviderName;
-    fetch(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
-}
-
 declare const BETTER_LYRICS_BASE = "https://lyrics-api.boidu.dev";
 declare function fetchFromBetterLyrics(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
 declare const betterLyricsProvider: LyricsProvider;
@@ -654,6 +843,56 @@ declare const KUGOU_SEARCH_BASE = "https://mobileservice.kugou.com";
 declare const KUGOU_LYRICS_BASE = "https://lyrics.kugou.com";
 declare function fetchFromKuGou(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
 declare const kugouProvider: LyricsProvider;
+
+/**
+ * Fetches lyrics from SimpMusic. Tries title+artist lookup first, then
+ * falls back to videoId-based lookup if the first returns no syncedLyric.
+ *
+ * Returns null on any error or no usable result.
+ */
+declare function fetchFromSimpMusic(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch, videoId?: string): Promise<Lyrics | null>;
+declare const simpMusicProvider: LyricsProvider;
+
+/**
+ * Fetches lyrics from YouTube Music's first-party lyrics tab via InnerTube.
+ *
+ * API path used:
+ *   yt.music.getLyrics(videoId)
+ *   → MusicDescriptionShelf | undefined   (node_modules/youtubei.js/dist/src/core/clients/Music.d.ts:31)
+ *   → shelf.description.toString()        (MusicDescriptionShelf.description is a Text instance)
+ *
+ * Returns plain text only — YTM native lyrics have no timestamps.
+ *
+ * Wave 2 must do:
+ *   - Add 'youtube-native' to LyricsProviderName union in src/lyrics/provider.ts
+ *   - Export YouTubeNativeLyricsProvider from src/index.ts
+ *   - Instantiate with the Innertube instance in MusicKit.ensureClients()
+ *   - Add to getLyrics provider chain (passing the resolved videoId as the 5th arg)
+ */
+declare class YouTubeNativeLyricsProvider implements LyricsProvider {
+    private readonly yt;
+    readonly name: LyricsProviderName;
+    constructor(yt: Innertube);
+    fetch(_artist: string, _title: string, _duration?: number, _fetchFn?: typeof globalThis.fetch, videoId?: string): Promise<Lyrics | null>;
+}
+
+/**
+ * YouTube transcript/subtitle provider — last-resort fallback.
+ *
+ * Uses `yt.music.getInfo(videoId).getTranscript()` to retrieve auto-captions
+ * or manually-uploaded captions for a YouTube video. For music videos the
+ * transcript is essentially a synced lyrics track. Auto-captions are imperfect
+ * (mishears, no punctuation) but offer universal coverage when every other
+ * provider fails.
+ *
+ * Requires a `videoId` — without one the provider immediately returns null.
+ */
+declare class YouTubeSubtitleLyricsProvider implements LyricsProvider {
+    private readonly yt;
+    readonly name: LyricsProviderName;
+    constructor(yt: Innertube);
+    fetch(_artist: string, _title: string, _duration?: number, _fetchFn?: typeof globalThis.fetch, videoId?: string): Promise<Lyrics | null>;
+}
 
 declare const ThumbnailSchema: z.ZodObject<{
     url: z.ZodString;
@@ -714,4 +953,4 @@ declare function safeParseAlbum(data: unknown): Album | null;
 declare function safeParseArtist(data: unknown): Artist | null;
 declare function safeParsePlaylist(data: unknown): Playlist | null;
 
-export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, BETTER_LYRICS_BASE, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, KUGOU_LYRICS_BASE, KUGOU_SEARCH_BASE, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, betterLyricsProvider, fetchFromBetterLyrics, fetchFromKuGou, fetchFromLrclib, fetchFromLyricsOvh, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, kugouProvider, lrclibProvider, lyricsOvhProvider, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };
+export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, BETTER_LYRICS_BASE, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, KUGOU_LYRICS_BASE, KUGOU_SEARCH_BASE, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, LyricsRegistry, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RegistryPosition, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, YouTubeNativeLyricsProvider, YouTubeSubtitleLyricsProvider, betterLyricsProvider, fetchFromBetterLyrics, fetchFromKuGou, fetchFromLrclib, fetchFromLyricsOvh, fetchFromSimpMusic, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, kugouProvider, lrclibProvider, lyricsOvhProvider, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, simpMusicProvider, version };

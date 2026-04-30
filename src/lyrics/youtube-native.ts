@@ -19,8 +19,7 @@ import type { LyricsProvider, LyricsProviderName } from './provider.js'
  *   - Add to getLyrics provider chain (passing the resolved videoId as the 5th arg)
  */
 export class YouTubeNativeLyricsProvider implements LyricsProvider {
-  // Wave 2: add 'youtube-native' to LyricsProviderName. Cast needed until the union is updated.
-  readonly name = 'youtube-native' as LyricsProviderName
+  readonly name: LyricsProviderName = 'youtube-native'
 
   constructor(private readonly yt: Innertube) {}
 

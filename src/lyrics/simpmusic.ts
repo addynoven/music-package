@@ -1,7 +1,6 @@
 import { parseLrc } from './lrc-utils'
 import type { Lyrics } from '../models'
-// NOTE for Wave 2: add 'simpmusic' to the LyricsProviderName union in src/lyrics/provider.ts
-import type { LyricsProvider, LyricsProviderName } from './provider'
+import type { LyricsProvider } from './provider'
 
 export const SIMPMUSIC_BASE = 'https://api-lyrics.simpmusic.org'
 
@@ -109,10 +108,8 @@ export async function fetchFromSimpMusic(
   }
 }
 
-// Wave 2 must add 'simpmusic' to the LyricsProviderName union in src/lyrics/provider.ts
-// and re-export this provider from src/index.ts.
 export const simpMusicProvider: LyricsProvider = {
-  name: 'simpmusic' as LyricsProviderName,
-  fetch: (artist, title, duration, fetchFn) =>
-    fetchFromSimpMusic(artist, title, duration, fetchFn),
+  name: 'simpmusic',
+  fetch: (artist, title, duration, fetchFn, videoId) =>
+    fetchFromSimpMusic(artist, title, duration, fetchFn, videoId),
 }

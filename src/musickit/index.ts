@@ -11,10 +11,15 @@ import { PodcastClient } from '../podcast'
 import { MusicKitEmitter } from '../events'
 import { YouTubeMusicSource } from '../sources/youtube-music'
 import { YouTubeDataAPISource } from '../sources/youtube-data-api'
-import { fetchFromLrclib } from '../lyrics/lrclib'
-import { fetchFromLyricsOvh } from '../lyrics/lyrics-ovh'
-import { fetchFromBetterLyrics } from '../lyrics/better-lyrics'
-import { fetchFromKuGou } from '../lyrics/kugou'
+import { lrclibProvider } from '../lyrics/lrclib'
+import { lyricsOvhProvider } from '../lyrics/lyrics-ovh'
+import { betterLyricsProvider } from '../lyrics/better-lyrics'
+import { kugouProvider } from '../lyrics/kugou'
+import { simpMusicProvider } from '../lyrics/simpmusic'
+import { YouTubeNativeLyricsProvider } from '../lyrics/youtube-native'
+import { YouTubeSubtitleLyricsProvider } from '../lyrics/youtube-subtitle'
+import { LyricsRegistry, type RegistryPosition } from '../lyrics/registry'
+import type { LyricsProvider, LyricsProviderName } from '../lyrics/provider'
 import { resolveInput } from '../utils/url-resolver'
 import { readCookieHeader } from '../utils/cookies'
 import { makeFetch } from '../utils/fetch'
@@ -34,6 +39,7 @@ import type {
   AudioTrack,
   StreamingData,
   Lyrics,
+  LyricsProviderSpec,
   SearchFilter,
   Quality,
   DownloadOptions,
@@ -106,6 +112,7 @@ export class MusicKit {
   private _identifier: Identifier | null = null
   private _podcast: PodcastClient | null = null
   private _poolPromise: Promise<InnertubePool> | null = null
+  private _lyrics: LyricsRegistry | null = null
 
   constructor(config: MusicKitConfig = {}, _yt?: unknown) {
     this.config = config
@@ -140,9 +147,8 @@ export class MusicKit {
       // lazy-create its own YTMUSIC session on first use.
       const pool = new InnertubePool({
         fetch: this.innerTubeFetch,
-        // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
-        poToken: (config as any).poToken as string | undefined,
-        getPoToken: (config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
+        poToken: config.poToken,
+        getPoToken: config.getPoToken,
       })
       // Eagerly start the YTMUSIC session for discovery — don't await here since
       // the constructor is sync. ensureClients will await as needed.
@@ -169,24 +175,44 @@ export class MusicKit {
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
     const instance = new MusicKit(config)
     const cookieHeader = config.cookiesPath ? readCookieHeader(config.cookiesPath) : ''
-    // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
     const pool = new InnertubePool({
       fetch: instance.innerTubeFetch,
       cookie: cookieHeader || undefined,
       lang: config.language,
       location: config.location,
-      poToken: (config as any).poToken as string | undefined,
-      getPoToken: (config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
+      poToken: config.poToken,
+      getPoToken: config.getPoToken,
     })
     const yt = await pool.get('YTMUSIC')
     instance._discovery = new DiscoveryClient(yt)
     instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, pool, instance.onStreamFallback)
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy)
+    instance._lyrics = instance.buildLyricsRegistry(yt, config.lyrics?.providers)
     return instance
   }
 
   registerSource(source: AudioSource): void {
     this.sources.push(source)
+  }
+
+  /**
+   * Adds a custom or built-in `LyricsProvider` to the active lyrics chain.
+   * Has no effect if `ensureClients()` hasn't run yet — call after the first
+   * SDK method, or instantiate with `MusicKit.create()` so the registry is
+   * eagerly initialised.
+   *
+   *   mk.registerLyricsProvider(myGeniusProvider)              // append
+   *   mk.registerLyricsProvider(myProvider, 'first')           // prepend
+   *   mk.registerLyricsProvider(myProvider, 'before:lrclib')   // ordered insert
+   */
+  registerLyricsProvider(provider: LyricsProvider, position: RegistryPosition = 'last'): void {
+    if (!this._lyrics) {
+      throw new ValidationError(
+        'Lyrics registry is not initialised yet. Call MusicKit.create() or invoke any browse/stream method first.',
+        'registerLyricsProvider',
+      )
+    }
+    this._lyrics.register(provider, position)
   }
 
   private sourceFor(query: string, override?: SourceName): AudioSource {
@@ -238,14 +264,13 @@ export class MusicKit {
     if (!this._discovery) {
       if (!this._poolPromise) {
         const cookieHeader = this.config.cookiesPath ? readCookieHeader(this.config.cookiesPath) : ''
-        // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
         const pool = new InnertubePool({
           fetch: this.innerTubeFetch,
           cookie: cookieHeader || undefined,
           lang: this.config.language,
           location: this.config.location,
-          poToken: (this.config as any).poToken as string | undefined,
-          getPoToken: (this.config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
+          poToken: this.config.poToken,
+          getPoToken: this.config.getPoToken,
         })
         this._poolPromise = pool.get('YTMUSIC').then(() => pool)
       }
@@ -254,6 +279,7 @@ export class MusicKit {
       this._discovery = new DiscoveryClient(yt)
       this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, pool, this.onStreamFallback)
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy)
+      this._lyrics = this.buildLyricsRegistry(yt, this.config.lyrics?.providers)
     }
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
@@ -491,36 +517,157 @@ export class MusicKit {
     return result
   }
 
-  async getLyrics(id: string): Promise<Lyrics | null> {
+  /**
+   * Fetches lyrics for a song.
+   *
+   * Walks the configured provider chain in order; the first non-null result
+   * wins. Pass `options.providers` to override the chain for this call only
+   * (built-in name strings or custom `LyricsProvider` instances).
+   *
+   *   mk.getLyrics('dQw4w9WgXcQ')
+   *   mk.getLyrics(id, { providers: ['lrclib', 'kugou'] })  // synced-only
+   *
+   * The returned `Lyrics.source` field reports which provider produced the
+   * result.
+   */
+  async getLyrics(id: string, options?: { providers?: LyricsProviderSpec[] }): Promise<Lyrics | null> {
     await this.ensureClients()
     const resolved = resolveInput(id)
 
     const cacheKey = `lyrics:${resolved}`
-    const cached = this.cache.get<Lyrics>(cacheKey)
-    if (cached !== null) return cached
+    // Cache only applies to the default chain — per-call overrides bypass cache.
+    if (!options?.providers) {
+      const cached = this.cache.get<Lyrics>(cacheKey)
+      if (cached !== null) return cached
+    }
 
-    let lyrics: Lyrics | null = null
+    // Resolve the provider chain BEFORE the try/catch so ValidationErrors
+    // from unknown provider names propagate to the caller. Per-call overrides
+    // with bad names should be loud, not silently fall back.
+    const chain = options?.providers
+      ? this.specToProviders(options.providers)
+      : (this._lyrics?.list() ?? [])
+
+    let result: Lyrics | null = null
 
     try {
       const meta = await this.getMetadata(resolved)
       const artist = sanitizeArtist(meta.artist)
       const title = sanitizeTitle(meta.title)
-      // Provider chain — first non-null wins.
-      // BetterLyrics first: only source of real per-word timings (Apple Music TTML).
-      // LRCLIB second: best line-level coverage for English/global music.
-      // lyrics.ovh third: plain-text fallback when synced is unavailable.
-      // KuGou last: covers Chinese music where the others have ~zero hits.
-      lyrics =
-        await fetchFromBetterLyrics(artist, title, meta.duration, this.sharedFetch)
-        ?? await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch)
-        ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch)
-        ?? await fetchFromKuGou(artist, title, meta.duration, this.sharedFetch)
+
+      for (const provider of chain) {
+        try {
+          const got = await provider.fetch(artist, title, meta.duration, this.sharedFetch, resolved)
+          if (got) {
+            result = { ...got, source: provider.name }
+            break
+          }
+        } catch {
+          // individual provider failure — try next
+        }
+      }
     } catch {
-      // ignore — return null below
+      // metadata fetch failed or other unrecoverable — return null below
     }
 
-    if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS)
-    return lyrics
+    if (result && !options?.providers) {
+      this.cache.set(cacheKey, result, Cache.TTL.LYRICS)
+    }
+    return result
+  }
+
+  // ── Lyrics registry helpers ──────────────────────────────────────────────
+
+  /** Built-in providers map — keyed by name. YT-backed providers are bound to `yt`. */
+  private builtinLyricsProviders(yt: import('youtubei.js').Innertube): Map<LyricsProviderName, LyricsProvider> {
+    return new Map<LyricsProviderName, LyricsProvider>([
+      ['better-lyrics', betterLyricsProvider],
+      ['lrclib', lrclibProvider],
+      ['lyrics-ovh', lyricsOvhProvider],
+      ['kugou', kugouProvider],
+      ['simpmusic', simpMusicProvider],
+      ['youtube-native', new YouTubeNativeLyricsProvider(yt)],
+      ['youtube-subtitle', new YouTubeSubtitleLyricsProvider(yt)],
+    ])
+  }
+
+  /**
+   * Default chain — synced-with-words first, plain-only fallbacks later,
+   * auto-captions last. Region-specific providers (KuGou for Chinese music)
+   * sit mid-chain so they don't dominate but also don't get drowned by
+   * lyrics.ovh's plain-only fallback.
+   */
+  private defaultLyricsChain: readonly LyricsProviderName[] = [
+    'better-lyrics',
+    'lrclib',
+    'simpmusic',
+    'youtube-native',
+    'kugou',
+    'lyrics-ovh',
+    'youtube-subtitle',
+  ]
+
+  private buildLyricsRegistry(
+    yt: import('youtubei.js').Innertube,
+    spec?: LyricsProviderSpec[],
+  ): LyricsRegistry {
+    const builtins = this.builtinLyricsProviders(yt)
+    const ordered = spec
+      ? this.specToProviders(spec, builtins)
+      : this.defaultLyricsChain.map((name) => builtins.get(name)!).filter(Boolean)
+    return new LyricsRegistry(ordered)
+  }
+
+  /** Resolves a mixed name/instance spec to concrete LyricsProvider instances. */
+  private specToProviders(
+    spec: LyricsProviderSpec[],
+    builtins?: Map<LyricsProviderName, LyricsProvider>,
+  ): LyricsProvider[] {
+    // Reuse the active registry's builtins when the registry is initialised.
+    const map = builtins ?? this.activeBuiltins()
+    const out: LyricsProvider[] = []
+    for (const entry of spec) {
+      if (typeof entry === 'string') {
+        const found = map.get(entry)
+        if (!found) {
+          throw new ValidationError(
+            `Unknown lyrics provider name: '${entry}'. Available: ${[...map.keys()].join(', ')}`,
+            'lyrics.providers',
+          )
+        }
+        out.push(found)
+      } else {
+        out.push(entry as LyricsProvider)
+      }
+    }
+    return out
+  }
+
+  /**
+   * Returns the builtins map currently bound to the active registry's
+   * `yt` instance. If the registry hasn't been initialised yet (`_lyrics`
+   * is null), returns a map of providers that don't need `yt` only —
+   * the YT-backed ones are omitted, and resolving a YT name string in that
+   * window will throw a clear error.
+   */
+  private activeBuiltins(): Map<LyricsProviderName, LyricsProvider> {
+    const partial = new Map<LyricsProviderName, LyricsProvider>([
+      ['better-lyrics', betterLyricsProvider],
+      ['lrclib', lrclibProvider],
+      ['lyrics-ovh', lyricsOvhProvider],
+      ['kugou', kugouProvider],
+      ['simpmusic', simpMusicProvider],
+    ])
+    // Best-effort: if the active registry has YT-native / YT-subtitle in it,
+    // pull them into the map so per-call override can resolve those names.
+    if (this._lyrics) {
+      for (const provider of this._lyrics.list()) {
+        if (provider.name === 'youtube-native' || provider.name === 'youtube-subtitle') {
+          partial.set(provider.name, provider)
+        }
+      }
+    }
+    return partial
   }
 
   async getCharts(options?: BrowseOptions): Promise<Section[]> {

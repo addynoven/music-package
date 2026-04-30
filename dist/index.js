@@ -41,6 +41,7 @@ __export(index_exports, {
   KUGOU_LYRICS_BASE: () => KUGOU_LYRICS_BASE,
   KUGOU_SEARCH_BASE: () => KUGOU_SEARCH_BASE,
   Logger: () => Logger,
+  LyricsRegistry: () => LyricsRegistry,
   MusicKit: () => MusicKit,
   MusicKitBaseError: () => MusicKitBaseError,
   MusicKitEmitter: () => MusicKitEmitter,
@@ -61,11 +62,14 @@ __export(index_exports, {
   StreamResolver: () => StreamResolver,
   ThumbnailSchema: () => ThumbnailSchema,
   ValidationError: () => ValidationError,
+  YouTubeNativeLyricsProvider: () => YouTubeNativeLyricsProvider,
+  YouTubeSubtitleLyricsProvider: () => YouTubeSubtitleLyricsProvider,
   betterLyricsProvider: () => betterLyricsProvider,
   fetchFromBetterLyrics: () => fetchFromBetterLyrics,
   fetchFromKuGou: () => fetchFromKuGou,
   fetchFromLrclib: () => fetchFromLrclib,
   fetchFromLyricsOvh: () => fetchFromLyricsOvh,
+  fetchFromSimpMusic: () => fetchFromSimpMusic,
   formatTimestamp: () => formatTimestamp,
   getActiveLine: () => getActiveLine,
   getActiveLineIndex: () => getActiveLineIndex,
@@ -83,12 +87,10 @@ __export(index_exports, {
   safeParsePlaylist: () => safeParsePlaylist,
   safeParseSong: () => safeParseSong,
   serializeLrc: () => serializeLrc,
+  simpMusicProvider: () => simpMusicProvider,
   version: () => version
 });
 module.exports = __toCommonJS(index_exports);
-
-// src/musickit/index.ts
-var import_youtubei = require("youtubei.js");
 
 // src/cache/index.ts
 var import_node_sqlite = require("node:sqlite");
@@ -788,6 +790,32 @@ async function resolveViaInnertube(yt, videoId, options) {
   return { stream, videoType, isPrivateTrack, clientUsed };
 }
 
+// src/stream/multi-client.ts
+var STREAM_CLIENT_FALLBACK_ORDER = [
+  "YTMUSIC",
+  "ANDROID_VR",
+  "TVHTML5"
+];
+async function tryClients(clients, fn, options) {
+  const errors = [];
+  for (const client of clients) {
+    options?.onAttempt?.(client);
+    let result;
+    try {
+      result = await fn(client);
+    } catch (err) {
+      errors.push({ client, error: err instanceof Error ? err : new Error(String(err)) });
+      continue;
+    }
+    if (result === null) {
+      errors.push({ client, error: new Error("returned null") });
+      continue;
+    }
+    return { result, clientUsed: client, errors };
+  }
+  return null;
+}
+
 // src/stream/index.ts
 function parseExpiry2(url) {
   try {
@@ -838,11 +866,11 @@ function ytdlpResolve(videoId, quality, cookiesPath, proxy) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, cookiesPath, proxy, yt, onFallback) {
+  constructor(cache, cookiesPath, proxy, pool, onFallback) {
     this.cache = cache;
     this.cookiesPath = cookiesPath;
     this.proxy = proxy;
-    this.yt = yt;
+    this.pool = pool;
     this.onFallback = onFallback;
   }
   /**
@@ -850,11 +878,12 @@ var StreamResolver = class {
    *
    * Chain (each step short-circuits on success):
    *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
-   *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
-   *      Skipped if no Innertube instance was provided.
+   *   2. InnerTube fast-path via `tryClients` walking `STREAM_CLIENT_FALLBACK_ORDER`.
+   *      Each client is fetched from the pool then passed to `resolveViaInnertube`.
+   *      Skipped if no InnertubePool was provided.
    *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
-   *      unavailable or throws, or for tracks that genuinely can't be played
-   *      from InnerTube (geo-blocked, age-restricted, etc.).
+   *      unavailable or all clients failed, or for tracks that genuinely can't
+   *      be played from InnerTube (geo-blocked, age-restricted, etc.).
    */
   async resolve(videoId, quality = "high") {
     const raw = typeof quality === "string" ? quality : quality.quality ?? "high";
@@ -865,13 +894,32 @@ var StreamResolver = class {
       return cached;
     }
     let data;
-    if (this.yt) {
-      try {
-        const result = await resolveViaInnertube(this.yt, videoId, { quality: q });
-        data = result.stream;
-      } catch (err) {
-        const reason = err.message;
-        this.onFallback?.(videoId, reason);
+    if (this.pool) {
+      const clientErrors = [];
+      const tried = await tryClients(
+        STREAM_CLIENT_FALLBACK_ORDER,
+        async (client) => {
+          try {
+            const yt = await this.pool.get(client);
+            const result = await resolveViaInnertube(yt, videoId, { quality: q, client });
+            return result.stream;
+          } catch (err) {
+            clientErrors.push({
+              client,
+              error: err instanceof Error ? err : new Error(String(err))
+            });
+            throw err;
+          }
+        }
+      );
+      if (tried !== null) {
+        data = tried.result;
+      } else {
+        if (this.onFallback) {
+          const last = clientErrors[clientErrors.length - 1];
+          const reason = last ? `${last.client}: ${last.error.message}` : "All InnerTube clients failed";
+          this.onFallback(videoId, reason);
+        }
       }
     }
     if (!data) {
@@ -879,6 +927,65 @@ var StreamResolver = class {
     }
     this.cache.set(cacheKey, data, Cache.TTL.STREAM);
     return data;
+  }
+};
+
+// src/stream/innertube-pool.ts
+var import_youtubei = require("youtubei.js");
+var CLIENT_TYPE_MAP = {
+  YTMUSIC: import_youtubei.ClientType.MUSIC,
+  // "WEB_REMIX"
+  ANDROID_VR: import_youtubei.ClientType.ANDROID_VR,
+  // "ANDROID_VR"
+  TVHTML5: import_youtubei.ClientType.TV,
+  // "TVHTML5"
+  WEB_REMIX: import_youtubei.ClientType.MUSIC
+  // "WEB_REMIX" — same as YTMUSIC
+};
+var InnertubePool = class {
+  constructor(options = {}) {
+    // Cache stores Promise<Innertube> so concurrent gets for the same client
+    // share a single in-flight create rather than spawning N parallel sessions.
+    this.cache = /* @__PURE__ */ new Map();
+    this.options = options;
+  }
+  /**
+   * Returns a cached `Innertube` instance for the given client, creating one
+   * on first use. Concurrent calls for the same client share one in-flight
+   * `Innertube.create` promise.
+   */
+  get(client) {
+    const existing = this.cache.get(client);
+    if (existing !== void 0) return existing;
+    const promise = import_youtubei.Innertube.create({
+      client_type: CLIENT_TYPE_MAP[client],
+      generate_session_locally: true,
+      ...this.options.fetch !== void 0 && { fetch: this.options.fetch },
+      ...this.options.cookie !== void 0 && { cookie: this.options.cookie },
+      ...this.options.lang !== void 0 && { lang: this.options.lang },
+      ...this.options.location !== void 0 && { location: this.options.location }
+    });
+    this.cache.set(client, promise);
+    return promise;
+  }
+  /**
+   * Returns `true` if a (resolved or pending) entry exists for the given client.
+   */
+  has(client) {
+    return this.cache.has(client);
+  }
+  /**
+   * Returns the list of client types that have been loaded (resolved or pending).
+   */
+  clients() {
+    return Array.from(this.cache.keys());
+  }
+  /**
+   * Clears the pool. Subsequent `get` calls will re-create instances.
+   * Returns a Promise for symmetry with potential future async cleanup.
+   */
+  async close() {
+    this.cache.clear();
   }
 };
 
@@ -1846,6 +1953,211 @@ function getContent(data) {
   return content;
 }
 
+// src/lyrics/simpmusic.ts
+var SIMPMUSIC_BASE = "https://api-lyrics.simpmusic.org";
+function toStringOrNull(v) {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+function toLyrics2(item) {
+  const synced = toStringOrNull(item.syncedLyrics);
+  const plain = toStringOrNull(item.plainLyric);
+  if (!synced && !plain) return null;
+  const syncedLines = synced ? parseLrc(synced) : null;
+  const plainText = plain ?? (syncedLines ? syncedLines.map((l) => l.text).join("\n") : null);
+  if (!plainText) return null;
+  return {
+    plain: plainText,
+    synced: syncedLines && syncedLines.length > 0 ? syncedLines : null
+  };
+}
+async function fetchItem(url, fetchFn) {
+  const res = await fetchFn(url);
+  if (!res.ok) return null;
+  const body = await res.json();
+  const item = body?.data?.[0];
+  return item ?? null;
+}
+async function fetchFromSimpMusic(artist, title, duration, fetchFn = globalThis.fetch, videoId) {
+  try {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const searchItem = await fetchItem(
+      `${SIMPMUSIC_BASE}/v1/search?q=${q}&limit=1`,
+      fetchFn
+    );
+    if (searchItem) {
+      const syncedPresent = toStringOrNull(searchItem.syncedLyrics) !== null;
+      const plainPresent = toStringOrNull(searchItem.plainLyric) !== null;
+      if (syncedPresent || plainPresent) {
+        const result = toLyrics2(searchItem);
+        if (result) return result;
+      }
+    }
+    if (!videoId) return null;
+    const videoItem = await fetchItem(
+      `${SIMPMUSIC_BASE}/v1/${encodeURIComponent(videoId)}`,
+      fetchFn
+    );
+    if (!videoItem) return null;
+    return toLyrics2(videoItem);
+  } catch {
+    return null;
+  }
+}
+var simpMusicProvider = {
+  name: "simpmusic",
+  fetch: (artist, title, duration, fetchFn, videoId) => fetchFromSimpMusic(artist, title, duration, fetchFn, videoId)
+};
+
+// src/lyrics/youtube-native.ts
+var YouTubeNativeLyricsProvider = class {
+  constructor(yt) {
+    this.yt = yt;
+    this.name = "youtube-native";
+  }
+  async fetch(_artist, _title, _duration, _fetchFn, videoId) {
+    if (!videoId) return null;
+    try {
+      const shelf = await this.yt.music.getLyrics(videoId);
+      if (!shelf) return null;
+      const plain = shelf.description.toString().trim();
+      if (!plain) return null;
+      return { plain, synced: null };
+    } catch {
+      return null;
+    }
+  }
+};
+
+// src/lyrics/youtube-subtitle.ts
+var NOISE_RE = /^\s*[\[(]?\s*(music|applause|laughter|♪|—|–)\s*[\])]?\s*$/i;
+function toCleanText(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (NOISE_RE.test(trimmed)) return null;
+  return trimmed;
+}
+var YouTubeSubtitleLyricsProvider = class {
+  constructor(yt) {
+    this.yt = yt;
+    this.name = "youtube-subtitle";
+  }
+  async fetch(_artist, _title, _duration, _fetchFn, videoId) {
+    if (!videoId) return null;
+    try {
+      const info = await this.yt.music.getInfo(videoId);
+      const transcriptInfo = await info.getTranscript();
+      const segments = transcriptInfo?.transcript?.content?.body?.initial_segments;
+      if (!segments || segments.length === 0) return null;
+      const lines = [];
+      for (const seg of segments) {
+        if (seg.type !== "TranscriptSegment") continue;
+        const rawText = seg.snippet?.toString?.() ?? "";
+        const text = toCleanText(rawText);
+        if (!text) continue;
+        const startMs = parseInt(seg.start_ms ?? "0", 10);
+        const time = isNaN(startMs) ? 0 : startMs / 1e3;
+        lines.push({ time, text });
+      }
+      if (lines.length === 0) return null;
+      const plain = lines.map((l) => l.text).join("\n");
+      return { plain, synced: lines };
+    } catch {
+      return null;
+    }
+  }
+};
+
+// src/lyrics/registry.ts
+var LyricsRegistry = class {
+  constructor(initial = []) {
+    this.providers = [...initial];
+  }
+  /** Returns the providers in their current order. */
+  list() {
+    return [...this.providers];
+  }
+  /** Returns the names of registered providers in order. */
+  names() {
+    return this.providers.map((p) => p.name);
+  }
+  /** Returns the named provider or undefined. */
+  get(name) {
+    return this.providers.find((p) => p.name === name);
+  }
+  /**
+   * Adds a provider at the given position. If a provider with the same name is
+   * already registered, it is removed first (re-register replaces).
+   * Throws if position references an unknown provider name.
+   */
+  register(provider, position = "last") {
+    this.providers = this.providers.filter((p) => p.name !== provider.name);
+    if (position === "first") {
+      this.providers.unshift(provider);
+      return;
+    }
+    if (position === "last") {
+      this.providers.push(provider);
+      return;
+    }
+    if (position.startsWith("before:")) {
+      const targetName = position.slice("before:".length);
+      const idx = this.providers.findIndex((p) => p.name === targetName);
+      if (idx === -1) {
+        throw new ValidationError(
+          `Cannot insert before '${targetName}': provider is not registered`,
+          "position"
+        );
+      }
+      this.providers.splice(idx, 0, provider);
+      return;
+    }
+    if (position.startsWith("after:")) {
+      const targetName = position.slice("after:".length);
+      const idx = this.providers.findIndex((p) => p.name === targetName);
+      if (idx === -1) {
+        throw new ValidationError(
+          `Cannot insert after '${targetName}': provider is not registered`,
+          "position"
+        );
+      }
+      this.providers.splice(idx + 1, 0, provider);
+      return;
+    }
+  }
+  /** Removes a provider by name. Returns true if it was registered. */
+  unregister(name) {
+    const before = this.providers.length;
+    this.providers = this.providers.filter((p) => p.name !== name);
+    return this.providers.length < before;
+  }
+  /**
+   * Replaces the entire chain. Useful for config-driven setup.
+   * Each entry can be:
+   *  - A LyricsProvider instance, OR
+   *  - A LyricsProviderName referencing a built-in (looked up via the
+   *    `builtins` map passed in)
+   * Unknown name strings throw a ValidationError.
+   */
+  replace(spec, builtins) {
+    const resolved = [];
+    for (const entry of spec) {
+      if (typeof entry === "string") {
+        const builtin = builtins.get(entry);
+        if (!builtin) {
+          throw new ValidationError(
+            `Unknown lyrics provider name: '${entry}'`,
+            "spec"
+          );
+        }
+        resolved.push(builtin);
+      } else {
+        resolved.push(entry);
+      }
+    }
+    this.providers = resolved;
+  }
+};
+
 // src/utils/url-resolver.ts
 var YTM_BASE = "music.youtube.com";
 var SPOTIFY_TRACK_RE = /^https?:\/\/open\.spotify\.com\/track\//;
@@ -2044,12 +2356,28 @@ var _MusicKit = class _MusicKit {
     this._downloader = null;
     this._identifier = null;
     this._podcast = null;
-    this._ytPromise = null;
+    this._poolPromise = null;
+    this._lyrics = null;
     // Bound so it can be passed by reference to StreamResolver without losing `this`.
     this.onStreamFallback = (videoId, reason) => {
       this.log.debug(`[stream] InnerTube fast-path failed for ${videoId}, falling back to yt-dlp: ${reason}`);
       this.emitter.emit("retry", "stream", 1, `innertube\u2192ytdlp: ${reason}`);
     };
+    /**
+     * Default chain — synced-with-words first, plain-only fallbacks later,
+     * auto-captions last. Region-specific providers (KuGou for Chinese music)
+     * sit mid-chain so they don't dominate but also don't get drowned by
+     * lyrics.ovh's plain-only fallback.
+     */
+    this.defaultLyricsChain = [
+      "better-lyrics",
+      "lrclib",
+      "simpmusic",
+      "youtube-native",
+      "kugou",
+      "lyrics-ovh",
+      "youtube-subtitle"
+    ];
     this.config = config;
     this.sourceOrder = resolveSourceOrder(config.sourceOrder);
     const cacheConfig = config.cache ?? {};
@@ -2074,9 +2402,19 @@ var _MusicKit = class _MusicKit {
     this.sharedFetch = makeFetch({ proxy: config.proxy, session: this.session });
     this.innerTubeFetch = config.proxy ? makeFetch({ proxy: config.proxy }) : void 0;
     if (_yt) {
-      this._discovery = new DiscoveryClient(_yt);
-      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, _yt, this.onStreamFallback);
-      this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath, config.proxy);
+      const pool = new InnertubePool({
+        fetch: this.innerTubeFetch,
+        poToken: config.poToken,
+        getPoToken: config.getPoToken
+      });
+      const ytPromise = pool.get("YTMUSIC");
+      this._poolPromise = ytPromise.then(() => pool);
+      ytPromise.then((yt) => {
+        this._discovery = new DiscoveryClient(yt);
+        this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, pool, this.onStreamFallback);
+        this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath, config.proxy);
+      }).catch(() => {
+      });
     }
     if (!config.youtubeApiKey && !config.cookiesPath) {
       this.log.warn("[MusicKit] No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.");
@@ -2102,20 +2440,42 @@ var _MusicKit = class _MusicKit {
   static async create(config = {}) {
     const instance = new _MusicKit(config);
     const cookieHeader = config.cookiesPath ? readCookieHeader(config.cookiesPath) : "";
-    const yt = await import_youtubei.Innertube.create({
-      generate_session_locally: true,
-      ...instance.innerTubeFetch ? { fetch: instance.innerTubeFetch } : {},
-      ...cookieHeader ? { cookie: cookieHeader } : {},
-      ...config.language ? { lang: config.language } : {},
-      ...config.location ? { location: config.location } : {}
+    const pool = new InnertubePool({
+      fetch: instance.innerTubeFetch,
+      cookie: cookieHeader || void 0,
+      lang: config.language,
+      location: config.location,
+      poToken: config.poToken,
+      getPoToken: config.getPoToken
     });
+    const yt = await pool.get("YTMUSIC");
     instance._discovery = new DiscoveryClient(yt);
-    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, yt, instance.onStreamFallback);
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, pool, instance.onStreamFallback);
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy);
+    instance._lyrics = instance.buildLyricsRegistry(yt, config.lyrics?.providers);
     return instance;
   }
   registerSource(source) {
     this.sources.push(source);
+  }
+  /**
+   * Adds a custom or built-in `LyricsProvider` to the active lyrics chain.
+   * Has no effect if `ensureClients()` hasn't run yet — call after the first
+   * SDK method, or instantiate with `MusicKit.create()` so the registry is
+   * eagerly initialised.
+   *
+   *   mk.registerLyricsProvider(myGeniusProvider)              // append
+   *   mk.registerLyricsProvider(myProvider, 'first')           // prepend
+   *   mk.registerLyricsProvider(myProvider, 'before:lrclib')   // ordered insert
+   */
+  registerLyricsProvider(provider, position = "last") {
+    if (!this._lyrics) {
+      throw new ValidationError(
+        "Lyrics registry is not initialised yet. Call MusicKit.create() or invoke any browse/stream method first.",
+        "registerLyricsProvider"
+      );
+    }
+    this._lyrics.register(provider, position);
   }
   sourceFor(query, override) {
     if (override === "youtube") {
@@ -2155,20 +2515,24 @@ var _MusicKit = class _MusicKit {
   }
   async ensureClients() {
     if (!this._discovery) {
-      if (!this._ytPromise) {
+      if (!this._poolPromise) {
         const cookieHeader = this.config.cookiesPath ? readCookieHeader(this.config.cookiesPath) : "";
-        this._ytPromise = import_youtubei.Innertube.create({
-          generate_session_locally: true,
-          ...this.innerTubeFetch ? { fetch: this.innerTubeFetch } : {},
-          ...cookieHeader ? { cookie: cookieHeader } : {},
-          ...this.config.language ? { lang: this.config.language } : {},
-          ...this.config.location ? { location: this.config.location } : {}
+        const pool2 = new InnertubePool({
+          fetch: this.innerTubeFetch,
+          cookie: cookieHeader || void 0,
+          lang: this.config.language,
+          location: this.config.location,
+          poToken: this.config.poToken,
+          getPoToken: this.config.getPoToken
         });
+        this._poolPromise = pool2.get("YTMUSIC").then(() => pool2);
       }
-      const yt = await this._ytPromise;
+      const pool = await this._poolPromise;
+      const yt = await pool.get("YTMUSIC");
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, yt, this.onStreamFallback);
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, pool, this.onStreamFallback);
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy);
+      this._lyrics = this.buildLyricsRegistry(yt, this.config.lyrics?.providers);
     }
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
@@ -2372,22 +2736,111 @@ var _MusicKit = class _MusicKit {
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
-  async getLyrics(id) {
+  /**
+   * Fetches lyrics for a song.
+   *
+   * Walks the configured provider chain in order; the first non-null result
+   * wins. Pass `options.providers` to override the chain for this call only
+   * (built-in name strings or custom `LyricsProvider` instances).
+   *
+   *   mk.getLyrics('dQw4w9WgXcQ')
+   *   mk.getLyrics(id, { providers: ['lrclib', 'kugou'] })  // synced-only
+   *
+   * The returned `Lyrics.source` field reports which provider produced the
+   * result.
+   */
+  async getLyrics(id, options) {
     await this.ensureClients();
     const resolved = resolveInput(id);
     const cacheKey = `lyrics:${resolved}`;
-    const cached = this.cache.get(cacheKey);
-    if (cached !== null) return cached;
-    let lyrics = null;
+    if (!options?.providers) {
+      const cached = this.cache.get(cacheKey);
+      if (cached !== null) return cached;
+    }
+    const chain = options?.providers ? this.specToProviders(options.providers) : this._lyrics?.list() ?? [];
+    let result = null;
     try {
       const meta = await this.getMetadata(resolved);
       const artist = sanitizeArtist(meta.artist);
       const title = sanitizeTitle(meta.title);
-      lyrics = await fetchFromBetterLyrics(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch) ?? await fetchFromKuGou(artist, title, meta.duration, this.sharedFetch);
+      for (const provider of chain) {
+        try {
+          const got = await provider.fetch(artist, title, meta.duration, this.sharedFetch, resolved);
+          if (got) {
+            result = { ...got, source: provider.name };
+            break;
+          }
+        } catch {
+        }
+      }
     } catch {
     }
-    if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS);
-    return lyrics;
+    if (result && !options?.providers) {
+      this.cache.set(cacheKey, result, Cache.TTL.LYRICS);
+    }
+    return result;
+  }
+  // ── Lyrics registry helpers ──────────────────────────────────────────────
+  /** Built-in providers map — keyed by name. YT-backed providers are bound to `yt`. */
+  builtinLyricsProviders(yt) {
+    return /* @__PURE__ */ new Map([
+      ["better-lyrics", betterLyricsProvider],
+      ["lrclib", lrclibProvider],
+      ["lyrics-ovh", lyricsOvhProvider],
+      ["kugou", kugouProvider],
+      ["simpmusic", simpMusicProvider],
+      ["youtube-native", new YouTubeNativeLyricsProvider(yt)],
+      ["youtube-subtitle", new YouTubeSubtitleLyricsProvider(yt)]
+    ]);
+  }
+  buildLyricsRegistry(yt, spec) {
+    const builtins = this.builtinLyricsProviders(yt);
+    const ordered = spec ? this.specToProviders(spec, builtins) : this.defaultLyricsChain.map((name) => builtins.get(name)).filter(Boolean);
+    return new LyricsRegistry(ordered);
+  }
+  /** Resolves a mixed name/instance spec to concrete LyricsProvider instances. */
+  specToProviders(spec, builtins) {
+    const map = builtins ?? this.activeBuiltins();
+    const out = [];
+    for (const entry of spec) {
+      if (typeof entry === "string") {
+        const found = map.get(entry);
+        if (!found) {
+          throw new ValidationError(
+            `Unknown lyrics provider name: '${entry}'. Available: ${[...map.keys()].join(", ")}`,
+            "lyrics.providers"
+          );
+        }
+        out.push(found);
+      } else {
+        out.push(entry);
+      }
+    }
+    return out;
+  }
+  /**
+   * Returns the builtins map currently bound to the active registry's
+   * `yt` instance. If the registry hasn't been initialised yet (`_lyrics`
+   * is null), returns a map of providers that don't need `yt` only —
+   * the YT-backed ones are omitted, and resolving a YT name string in that
+   * window will throw a clear error.
+   */
+  activeBuiltins() {
+    const partial = /* @__PURE__ */ new Map([
+      ["better-lyrics", betterLyricsProvider],
+      ["lrclib", lrclibProvider],
+      ["lyrics-ovh", lyricsOvhProvider],
+      ["kugou", kugouProvider],
+      ["simpmusic", simpMusicProvider]
+    ]);
+    if (this._lyrics) {
+      for (const provider of this._lyrics.list()) {
+        if (provider.name === "youtube-native" || provider.name === "youtube-subtitle") {
+          partial.set(provider.name, provider);
+        }
+      }
+    }
+    return partial;
   }
   async getCharts(options) {
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
@@ -2554,7 +3007,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "4.1.0";
+var version = "4.2.0";
 
 // src/models/index.ts
 var SearchFilter = {
@@ -2603,6 +3056,7 @@ function isStreamExpired(stream) {
   KUGOU_LYRICS_BASE,
   KUGOU_SEARCH_BASE,
   Logger,
+  LyricsRegistry,
   MusicKit,
   MusicKitBaseError,
   MusicKitEmitter,
@@ -2623,11 +3077,14 @@ function isStreamExpired(stream) {
   StreamResolver,
   ThumbnailSchema,
   ValidationError,
+  YouTubeNativeLyricsProvider,
+  YouTubeSubtitleLyricsProvider,
   betterLyricsProvider,
   fetchFromBetterLyrics,
   fetchFromKuGou,
   fetchFromLrclib,
   fetchFromLyricsOvh,
+  fetchFromSimpMusic,
   formatTimestamp,
   getActiveLine,
   getActiveLineIndex,
@@ -2645,5 +3102,6 @@ function isStreamExpired(stream) {
   safeParsePlaylist,
   safeParseSong,
   serializeLrc,
+  simpMusicProvider,
   version
 });

@@ -63,29 +63,38 @@ Sources        YouTubeMusicSource    (InnerTube via youtubei.js — default)
 `StreamResolver.resolve(videoId, quality)` walks this chain — first success wins:
 
 1. **SQLite cache** — `~6h` TTL keyed by `stream:<videoId>:<quality>`, skipped when the cached URL has expired.
-2. **InnerTube fast-path** (`src/stream/innertube-resolver.ts`) — calls `yt.music.getInfo`, reads `videoDetails.musicVideoType` from the raw player response (youtubei.js doesn't surface this field), picks an audio format via `info.chooseFormat({ format: 'opus' })` with `'mp4a'` fallback, then calls `format.decipher(yt.session.player)`. Sets `isPrivateTrack` when `musicVideoType === 'MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK'` so callers can skip HEAD validation. Skipped when no `Innertube` instance is wired (e.g. in unit tests that bypass `ensureClients`).
-3. **yt-dlp fallback** — universal last resort. Used when InnerTube throws (cipher failure, geo block, age gate) or when the resolver wasn't given an `Innertube` instance. Slower (~2-3s shell-out vs ~1.5-2s for InnerTube) but covers cases InnerTube can't.
+2. **InnerTube multi-client fast-path** — `tryClients(STREAM_CLIENT_FALLBACK_ORDER, ...)` walks `'YTMUSIC' → 'ANDROID_VR' → 'TVHTML5'`. For each client, fetches the corresponding `Innertube` from `InnertubePool`, calls `resolveViaInnertube(yt, videoId, { quality, client })` which uses `info.chooseFormat({ format: 'opus' })` (with `'mp4a'` fallback) + `format.decipher(yt.session.player)`. Reads `videoDetails.musicVideoType` and sets `isPrivateTrack` for `MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK`. Returns the first client's success.
+3. **yt-dlp fallback** — universal last resort when every InnerTube client fails. Slower (~2-3s shell-out vs ~1.5-2s for InnerTube) but covers cipher/geo/age-gate failures.
 
-`StreamResolver` accepts an optional `onFallback(videoId, reason)` callback that fires when (2) fails and (3) takes over — `MusicKit` wires this to a `'retry'` event with endpoint `'stream'`.
+`InnertubePool` (`src/stream/innertube-pool.ts`) lazy-creates one `Innertube` per `StreamClient`, caches the create promise so concurrent `get()`s share one round-trip, and accepts shared options (cookie, lang, location, fetch, poToken, getPoToken).
 
-`src/stream/multi-client.ts` exports `tryClients()` and `STREAM_CLIENT_FALLBACK_ORDER`. Currently unused by the default resolver — youtubei.js binds a single client at session creation. Future work (v4.2.0) will use this helper to rotate across `YTMUSIC` / `ANDROID_VR` / `TVHTML5` Innertube sessions when a client is throttled.
+PoToken support is **pluggable**: `MusicKitConfig.poToken` (static) or `MusicKitConfig.getPoToken: (videoId, client) => Promise<string | null>` (callback). Most content streams without a PoToken via `ANDROID_VR`. The SDK doesn't ship a built-in generator — users plug their own (puppeteer microservice, manual copy-paste).
+
+`StreamResolver` accepts an optional `onFallback(videoId, reason)` callback fired when all InnerTube clients fail and yt-dlp takes over — `MusicKit` wires this to a `'retry'` event with endpoint `'stream'`.
+
+`src/stream/client-headers.ts` exports `headersForClient(clientId)`, `parseClientFromUrl(url)`, `headersForUrl(url)` — per-client UA/Origin/Referer for HEAD validation against the YouTube CDN. Not yet wired into `StreamResolver` itself; useful for downstream consumers.
 
 ### Lyrics
 
-`getLyrics(videoId)` returns `{ plain: string, synced: LyricLine[] | null } | null`. `LyricLine.words` is optionally populated with per-word timings — only `BetterLyrics` fills this; the others leave it undefined.
+`getLyrics(videoId, options?)` returns `{ plain: string, synced: LyricLine[] | null, source?: LyricsProviderName } | null`. `LyricLine.words` is optionally populated with per-word timings — only `BetterLyrics` fills this; the others leave it undefined. `source` reports which provider produced the result.
 
-Provider chain (first non-null wins):
+Default provider chain (first non-null wins) — set by the registry constructed in `ensureClients()`:
 
 1. **BetterLyrics** (`lyrics-api.boidu.dev`) — Apple Music TTML with real per-word `<span begin end>` timings. The only free no-auth source of word-level data.
-2. **LRCLIB** (`lrclib.net/api/get` strict ±2s, falls through to `/api/search` ±5s closest) — best line-level coverage for global music.
-3. **lyrics.ovh** — plain text only, `synced: null`. Catches songs the others miss.
-4. **KuGou** (`mobileservice.kugou.com` + `lyrics.kugou.com`) — Chinese music coverage where LRCLIB is empty.
+2. **LRCLIB** (`lrclib.net/api/get` strict ±2s → `/api/search` ±5s closest) — best line-level coverage for global music.
+3. **SimpMusic** (`api-lyrics.simpmusic.org`) — fan-hosted aggregator; lookup by YouTube videoId fallback handles tracks with bad metadata.
+4. **YouTube Music native** (`yt.music.getLyrics(videoId)`) — official major-label lyrics tab; plain text only.
+5. **KuGou** (`mobileservice.kugou.com` + `lyrics.kugou.com`) — Chinese music coverage where LRCLIB is empty.
+6. **lyrics.ovh** — plain-text fallback. Catches songs the others miss.
+7. **YouTube subtitles** (`info.getTranscript()`) — universal last resort using auto-captions; filters `[Music]`/`[Applause]`/`♪` non-lyric segments.
+
+**User-configurable**: pass `MusicKitConfig.lyrics.providers` to override the chain (built-in name strings or custom `LyricsProvider` instances), call `mk.registerLyricsProvider(provider, position?)` for runtime registration, or use the per-call `mk.getLyrics(id, { providers })` override. Per-call overrides bypass the lyrics cache.
 
 YouTube titles/artists are sanitized before lookup — strips "Official Video", VEVO suffix, "(Explicit)", etc. (`sanitizeTitle`/`sanitizeArtist` in `src/musickit/index.ts`).
 
-Cached 10 years per resolved id — lyrics don't change.
+Cached 10 years per resolved id (default chain only) — lyrics don't change.
 
-`src/lyrics/lrc-utils.ts` exports parse/seek/offset/serialize helpers (re-exported from the SDK root). `src/lyrics/provider.ts` defines the `LyricsProvider` interface; existing providers expose conforming exports (`lrclibProvider`, `lyricsOvhProvider`).
+`src/lyrics/lrc-utils.ts` exports parse/seek/offset/serialize helpers (re-exported from the SDK root). `src/lyrics/provider.ts` defines the `LyricsProvider` interface and `LyricsProviderName` union (re-exported from `models`). All 7 providers expose a conforming const (`lrclibProvider`, `betterLyricsProvider`, `kugouProvider`, `simpMusicProvider`, `lyricsOvhProvider`, plus class-based `YouTubeNativeLyricsProvider` / `YouTubeSubtitleLyricsProvider` requiring an `Innertube` at construction).
 
 ### Audio identification (`src/identifier/`)
 

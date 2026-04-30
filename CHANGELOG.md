@@ -5,6 +5,50 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.2.0] — 2026-04-30
+
+Closes the two remaining gaps Echo Music had on us. Stream resolution gets a proper multi-client InnerTube pool with PoToken plumbing. Lyrics grows from 4 to 7 providers with a user-configurable chain.
+
+**No breaking API changes.** All additions are opt-in. Existing callers keep working without changes.
+
+### Added — multi-client stream resolution
+
+- **`InnertubePool`** (`src/stream/innertube-pool.ts`) — lazy pool of `Innertube` instances keyed by `StreamClient` (`'YTMUSIC' | 'ANDROID_VR' | 'TVHTML5' | 'WEB_REMIX'`). `pool.get(client)` creates the session on first use, caches the promise so concurrent gets share one create call. Replaces the single-Innertube approach in `StreamResolver`.
+- **Multi-client fallback wired into `StreamResolver.resolve()`** — walks `STREAM_CLIENT_FALLBACK_ORDER = ['YTMUSIC', 'ANDROID_VR', 'TVHTML5']` via `tryClients()`. Each client is tried until one returns a valid `StreamingData`; the last error message is surfaced to `onFallback` when all clients fail. yt-dlp remains the universal final fallback.
+- **`MusicKitConfig.poToken`** + **`MusicKitConfig.getPoToken`** — pluggable PoToken support. Static token via `poToken: string`, or async generator via `getPoToken: (videoId, client) => Promise<string | null>`. Most content streams without a PoToken via ANDROID_VR; web clients increasingly require one. The SDK doesn't ship a built-in generator (would require a Chromium dep) — bring your own (puppeteer-based microservice, manual copy-paste, etc.).
+- **`src/stream/client-headers.ts`** — `headersForClient(clientId)`, `parseClientFromUrl(url)`, `headersForUrl(url)`. Per-client UA/Origin/Referer canonical headers extracted from Echo Music's `YouTubeClient.kt`. Useful when you need to fetch a stream URL through your own pipeline (CDN URLs include `c=<client>` and YouTube CDN expects matching headers — sending the wrong ones returns 403). Not yet wired into `StreamResolver` itself.
+
+### Added — lyrics provider chain (7 providers)
+
+- **SimpMusic** (`src/lyrics/simpmusic.ts`) — fan-hosted aggregator. Lookup by YouTube `videoId` makes it work when artist/title metadata is unreliable (mojibake, wrong-language metadata, etc.). Two-step flow: search by `title artist`, fall back to `videoId`-keyed lookup.
+- **YouTube Music native lyrics** (`src/lyrics/youtube-native.ts`) — wraps `yt.music.getLyrics(videoId)`. Official, licensed major-label coverage. Plain text only (`synced: null`).
+- **YouTube subtitles / transcripts** (`src/lyrics/youtube-subtitle.ts`) — wraps `info.getTranscript()`. Last-resort universal fallback for any video with auto-captions. Filters `[Music]`/`[Applause]`/`♪` non-lyric segments. Synced at line level, no per-word timing.
+
+### Added — user-configurable provider chain
+
+- **`MusicKitConfig.lyrics.providers`** — pass an ordered array of built-in name strings (`'better-lyrics'`, `'lrclib'`, etc.) and/or custom `LyricsProvider` instances. Omitted providers are disabled. Default chain when undefined: `['better-lyrics', 'lrclib', 'simpmusic', 'youtube-native', 'kugou', 'lyrics-ovh', 'youtube-subtitle']`.
+- **`mk.registerLyricsProvider(provider, position?)`** — runtime registration with positional placement: `'first'`, `'last'`, `'before:<name>'`, `'after:<name>'`. Throws `ValidationError` on unknown reference names.
+- **`mk.getLyrics(id, { providers })`** — per-call override accepting the same `LyricsProviderSpec[]` as the config option. Useful for "synced-only" calls (`{ providers: ['lrclib', 'kugou'] }`) without changing global config. Per-call overrides bypass the lyrics cache.
+- **`Lyrics.source`** — new optional field reporting which provider produced the result (`'better-lyrics' | 'lrclib' | ...`). Lets consumers display attribution / debug coverage gaps.
+- **`LyricsRegistry`** class + **`RegistryPosition`** type exported publicly for advanced users who want to manage their own chain instance.
+
+### Internal
+
+- `StreamResolver` constructor: `(cache, cookiesPath?, proxy?, yt?: Innertube?, onFallback?)` → `(cache, cookiesPath?, proxy?, pool?: InnertubePool?, onFallback?)`. Same arg position; type changed from a single Innertube to a pool.
+- `MusicKit` constructor & `create()` now build an `InnertubePool` and seed `'YTMUSIC'` for the discovery layer. The legacy single-Innertube constructor branch (mostly used by tests) ignores the passed instance and creates a fresh pool — documented inline.
+- 18 musickit unit-test files updated to add `ClientType` to their `youtubei.js` mock factory (required by `innertube-pool.ts`'s module-load-time client map).
+- `LyricsProvider.fetch()` signature extended with optional `videoId?: string` 5th arg. Additive — existing implementations don't need updates.
+- `LyricsProviderName` union extended with `'simpmusic'`, `'youtube-native'`, `'youtube-subtitle'`. Moved canonical home to `src/models/index.ts` (re-exported from `src/lyrics/provider.ts` for backward compat).
+- 130+ new unit tests across `LyricsRegistry`, `InnertubePool`, `client-headers`, the 3 new lyrics providers, and the rewired `getLyrics` chain. Total: 774 unit tests passing.
+
+### Migration
+
+None required for typical usage. If you constructed a `StreamResolver` directly (rare — most consumers go through `MusicKit`), the 4th constructor arg is now `InnertubePool` instead of `Innertube`. Wrap your existing Innertube in a pool: `new StreamResolver(cache, cookiesPath, proxy, new InnertubePool({...}), onFallback)`.
+
+If you imported `LyricsProviderName` from `'musicstream-sdk/lyrics/provider'`, that path still works — the type is now defined in `models` and re-exported.
+
+---
+
 ## [4.1.0] — 2026-04-30
 
 Stream resolution and lyrics get teeth. The "4-step waterfall" CLAUDE.md described in v4 was aspirational — the actual `StreamResolver` was a single yt-dlp shell-out. v4.1 implements the real chain. Lyrics gets a proper provider chain with genuine per-word timings.

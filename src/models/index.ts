@@ -168,6 +168,24 @@ export interface CacheConfig {
 export type SourceName = 'youtube'
 export type SourcePreference = 'best' | SourceName[]
 
+/** Spec entry: built-in name string OR a custom LyricsProvider implementation. */
+export type LyricsProviderSpec = LyricsProviderName | { name: LyricsProviderName; fetch: (...args: unknown[]) => Promise<Lyrics | null> }
+
+export interface LyricsConfig {
+  /**
+   * Override the default lyrics provider chain.
+   *
+   * Pass an array of built-in provider names in your preferred order, or
+   * mix in custom `LyricsProvider` instances. Omitted providers are
+   * disabled.
+   *
+   * Default order (when undefined):
+   *   ['better-lyrics', 'lrclib', 'simpmusic', 'youtube-native',
+   *    'kugou', 'lyrics-ovh', 'youtube-subtitle']
+   */
+  providers?: LyricsProviderSpec[]
+}
+
 export interface MusicKitConfig {
   logLevel?: LogLevel
   logHandler?: (level: LogLevel, message: string, meta?: Record<string, unknown>) => void
@@ -189,6 +207,24 @@ export interface MusicKitConfig {
     acoustidApiKey: string
     songrecBin?: string
   }
+  /**
+   * Static PoToken passed to every InnerTube client that needs one.
+   * Most content streams without a PoToken via ANDROID_VR; web clients
+   * increasingly require one. Provide either a static token or a
+   * `getPoToken` callback. If both are set, `getPoToken` wins.
+   */
+  poToken?: string
+  /**
+   * Async PoToken generator — called per (videoId, client) when a
+   * PoToken is needed. Return null to skip PoToken for that call.
+   * Use this when your PoToken comes from an external service or a
+   * puppeteer-based generator.
+   */
+  getPoToken?: (videoId: string, client: string) => Promise<string | null>
+  /**
+   * Lyrics provider chain configuration. See `LyricsConfig`.
+   */
+  lyrics?: LyricsConfig
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

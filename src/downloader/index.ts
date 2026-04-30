@@ -29,14 +29,17 @@ function ytdlpDownload(
   destFile: string,
   format: DownloadFormat,
   cookiesPath?: string,
+  proxy?: string,
   filename?: string,
   onProgress?: (progress: DownloadProgress) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const cookiesArgs = cookiesPath ? ['--cookies', cookiesPath] : []
+    const proxyArgs = proxy ? ['--proxy', proxy] : []
     const proc = spawn('yt-dlp', [
       '--no-playlist',
       ...cookiesArgs,
+      ...proxyArgs,
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
       '-f', format === 'm4a' ? 'bestaudio[ext=m4a]/bestaudio' : 'bestaudio[ext=webm]/bestaudio',
@@ -69,13 +72,16 @@ export class Downloader {
     private readonly resolver: StreamResolver,
     private readonly discovery: DiscoveryClient,
     private readonly cookiesPath?: string,
+    private readonly proxy?: string,
   ) {}
 
   streamAudio(videoId: string): NodeJS.ReadableStream {
     const cookiesArgs = this.cookiesPath ? ['--cookies', this.cookiesPath] : []
+    const proxyArgs = this.proxy ? ['--proxy', this.proxy] : []
     const proc = spawn('yt-dlp', [
       '--no-playlist',
       ...cookiesArgs,
+      ...proxyArgs,
       '-f', 'bestaudio',
       '-o', '-',
       `https://music.youtube.com/watch?v=${videoId}`,
@@ -103,9 +109,11 @@ export class Downloader {
 
   streamPCM(videoId: string): NodeJS.ReadableStream {
     const cookiesArgs = this.cookiesPath ? ['--cookies', this.cookiesPath] : []
+    const proxyArgs = this.proxy ? ['--proxy', this.proxy] : []
     const ytdlp = spawn('yt-dlp', [
       '--no-playlist',
       ...cookiesArgs,
+      ...proxyArgs,
       '-f', 'bestaudio',
       '-o', '-',
       `https://music.youtube.com/watch?v=${videoId}`,
@@ -154,7 +162,7 @@ export class Downloader {
     const { mkdir } = await import('node:fs/promises')
     await mkdir(options.path ?? '.', { recursive: true })
 
-    await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress)
+    await ytdlpDownload(videoId, dest, format, this.cookiesPath, this.proxy, filename, options.onProgress)
   }
 
   private async fetchAndWrite(

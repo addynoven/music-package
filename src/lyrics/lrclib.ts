@@ -6,10 +6,10 @@ interface LrclibResponse {
   syncedLyrics?: string
 }
 
-export async function fetchFromLrclib(artist: string, title: string): Promise<Lyrics | null> {
+export async function fetchFromLrclib(artist: string, title: string, fetchFn: typeof fetch = globalThis.fetch): Promise<Lyrics | null> {
   try {
     const params = new URLSearchParams({ artist_name: artist, track_name: title })
-    const res = await fetch(`https://lrclib.net/api/get?${params}`, {
+    const res = await fetchFn(`https://lrclib.net/api/get?${params}`, {
       headers: { 'User-Agent': 'musicstream-sdk (https://github.com/addynoven/music-package)' },
     })
     if (!res.ok) return null

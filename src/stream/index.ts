@@ -11,13 +11,15 @@ function parseExpiry(url: string): number {
   }
 }
 
-function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string): Promise<StreamingData> {
+function ytdlpResolve(videoId: string, quality: Quality, cookiesPath?: string, proxy?: string): Promise<StreamingData> {
   return new Promise((resolve, reject) => {
     const formatSelector = quality === 'low' ? 'worstaudio' : 'bestaudio'
     const cookiesArgs = cookiesPath ? ['--cookies', cookiesPath] : []
+    const proxyArgs = proxy ? ['--proxy', proxy] : []
     execFile('yt-dlp', [
       '--no-playlist',
       ...cookiesArgs,
+      ...proxyArgs,
       '--dump-json',
       '-f', formatSelector,
       `https://music.youtube.com/watch?v=${videoId}`,
@@ -57,6 +59,7 @@ export class StreamResolver {
   constructor(
     private readonly cache: Cache,
     private readonly cookiesPath?: string,
+    private readonly proxy?: string,
   ) {}
 
   async resolve(videoId: string, quality: Quality | { codec?: string; quality?: Quality } = 'high'): Promise<StreamingData> {
@@ -69,7 +72,7 @@ export class StreamResolver {
       return cached
     }
 
-    const data = await ytdlpResolve(videoId, q, this.cookiesPath)
+    const data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy)
 
     this.cache.set(cacheKey, data, Cache.TTL.STREAM)
     return data

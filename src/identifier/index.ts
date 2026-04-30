@@ -13,6 +13,7 @@ export interface IdentifyResult {
 interface IdentifierOptions {
   acoustidApiKey: string
   songrecBin?: string
+  fetch?: typeof globalThis.fetch
 }
 
 export class Identifier {
@@ -26,7 +27,8 @@ export class Identifier {
       fingerprint,
     })
 
-    const response = await fetch(`${ACOUSTID_ENDPOINT}?${params}`)
+    const fetchFn = this.options.fetch ?? globalThis.fetch
+    const response = await fetchFn(`${ACOUSTID_ENDPOINT}?${params}`)
     if (!response.ok) throw new NetworkError(`AcoustID API error: ${response.status}`, response.status)
 
     const data = await response.json() as any

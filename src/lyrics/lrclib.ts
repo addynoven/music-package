@@ -24,11 +24,16 @@ function toLyrics(data: LrclibTrack): Lyrics | null {
 // Strict match: LRCLIB `/api/get` accepts artist + title + optional duration
 // (±2s tolerance server-side). Returns null if no exact match — never returns
 // lyrics from a different recording.
-async function getStrict(artist: string, title: string, duration?: number): Promise<Lyrics | null> {
+async function getStrict(
+  artist: string,
+  title: string,
+  duration: number | undefined,
+  fetchFn: typeof fetch,
+): Promise<Lyrics | null> {
   const params = new URLSearchParams({ artist_name: artist, track_name: title })
   if (duration && duration > 0) params.set('duration', String(Math.round(duration)))
 
-  const res = await fetch(`https://lrclib.net/api/get?${params}`, { headers: { 'User-Agent': UA } })
+  const res = await fetchFn(`https://lrclib.net/api/get?${params}`, { headers: { 'User-Agent': UA } })
   if (!res.ok) return null
   return toLyrics(await res.json() as LrclibTrack)
 }
@@ -36,9 +41,14 @@ async function getStrict(artist: string, title: string, duration?: number): Prom
 // Fallback: `/api/search` returns multiple candidates. We prefer the one with
 // synced lyrics AND closest duration to the playback track. Without a known
 // duration we can't safely guess, so we just pick the first synced result.
-async function searchClosest(artist: string, title: string, duration?: number): Promise<Lyrics | null> {
+async function searchClosest(
+  artist: string,
+  title: string,
+  duration: number | undefined,
+  fetchFn: typeof fetch,
+): Promise<Lyrics | null> {
   const params = new URLSearchParams({ artist_name: artist, track_name: title })
-  const res = await fetch(`https://lrclib.net/api/search?${params}`, { headers: { 'User-Agent': UA } })
+  const res = await fetchFn(`https://lrclib.net/api/search?${params}`, { headers: { 'User-Agent': UA } })
   if (!res.ok) return null
 
   const candidates = (await res.json()) as LrclibTrack[]
@@ -68,10 +78,11 @@ export async function fetchFromLrclib(
   artist: string,
   title: string,
   duration?: number,
+  fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<Lyrics | null> {
   try {
-    return (await getStrict(artist, title, duration))
-        ?? (await searchClosest(artist, title, duration))
+    return (await getStrict(artist, title, duration, fetchFn))
+        ?? (await searchClosest(artist, title, duration, fetchFn))
   } catch {
     return null
   }

@@ -1,7 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+vi.mock('youtubei.js', () => ({ Innertube: { create: vi.fn().mockResolvedValue({}) } }))
+vi.mock('youtubei.js/agnostic', () => ({ Platform: { shim: null, load: vi.fn() } }))
+vi.mock('../../../src/discovery')
+vi.mock('../../../src/stream')
+vi.mock('../../../src/cache')
+vi.mock('../../../src/rate-limiter')
+vi.mock('../../../src/retry')
+vi.mock('../../../src/session')
+
+import { RetryEngine } from '../../../src/retry'
+import { Cache } from '../../../src/cache'
+import { DiscoveryClient } from '../../../src/discovery'
+
+;(RetryEngine as any).mockImplementation(() => ({
+  execute: vi.fn().mockImplementation((fn: Function) => fn()),
+}))
+;(Cache as any).mockImplementation(() => ({
+  get: vi.fn().mockReturnValue(null),
+  set: vi.fn(),
+  delete: vi.fn(),
+  isUrlExpired: vi.fn().mockReturnValue(true),
+  close: vi.fn(),
+}))
+;(DiscoveryClient as any).mockImplementation(() => ({
+  autocomplete: vi.fn().mockResolvedValue([]),
+  search: vi.fn().mockResolvedValue({ songs: [], albums: [], artists: [], playlists: [] }),
+  getHome: vi.fn().mockResolvedValue([]),
+}))
+
 import { MusicKit } from '../../../src/musickit'
 import type { AudioSource } from '../../../src/sources/audio-source'
 import type { Song, StreamingData, SearchResults } from '../../../src/models'
+
+beforeEach(() => vi.clearAllMocks())
 
 function makeSong(overrides: Partial<Song> = {}): Song {
   return {

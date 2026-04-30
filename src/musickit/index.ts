@@ -14,6 +14,8 @@ import { YouTubeDataAPISource } from '../sources/youtube-data-api'
 import { fetchFromLrclib } from '../lyrics/lrclib'
 import { fetchFromLyricsOvh } from '../lyrics/lyrics-ovh'
 import { resolveInput } from '../utils/url-resolver'
+import { readCookieHeader } from '../utils/cookies'
+import { makeFetch } from '../utils/fetch'
 import { ValidationError, NotFoundError } from '../errors'
 import { Logger } from '../logger'
 import type { AudioSource } from '../sources/audio-source'
@@ -58,6 +60,10 @@ export class MusicKit {
   private readonly session: SessionManager
   private readonly emitter: MusicKitEmitter
   private readonly log: Logger
+  // sharedFetch: used for external API calls (lrclib, acoustid, lyrics.ovh) — proxy + session headers
+  private readonly sharedFetch: typeof fetch
+  // innerTubeFetch: used for Innertube.create — proxy only; youtubei.js manages its own UA/visitor-ID
+  private readonly innerTubeFetch: typeof fetch | undefined
   private readonly searchCache = new Map<string, SearchResults | Song[] | Album[] | Artist[]>()
   private readonly sourceOrder: SourceName[]
   readonly sources: AudioSource[] = []
@@ -90,11 +96,14 @@ export class MusicKit {
       visitorId: config.visitorId,
       userAgent: config.userAgent,
     })
+    this.sharedFetch = makeFetch({ proxy: config.proxy, session: this.session })
+    // For InnerTube: only proxy-route; youtubei.js manages UA + visitor-ID internally
+    this.innerTubeFetch = config.proxy ? makeFetch({ proxy: config.proxy }) : undefined
 
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt)
-      this._stream = new StreamResolver(this.cache, config.cookiesPath)
-      this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath)
+      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy)
+      this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath, config.proxy)
     }
 
     if (!config.youtubeApiKey && !config.cookiesPath) {
@@ -107,12 +116,19 @@ export class MusicKit {
   }
 
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
+    const instance = new MusicKit(config)
+    const cookieHeader = config.cookiesPath ? readCookieHeader(config.cookiesPath) : ''
     const yt = await Innertube.create({
       generate_session_locally: true,
+      ...(instance.innerTubeFetch ? { fetch: instance.innerTubeFetch } : {}),
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
       ...(config.language ? { lang: config.language } : {}),
       ...(config.location ? { location: config.location } : {}),
     })
-    return new MusicKit(config, yt)
+    instance._discovery = new DiscoveryClient(yt)
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy)
+    instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy)
+    return instance
   }
 
   registerSource(source: AudioSource): void {
@@ -134,16 +150,19 @@ export class MusicKit {
   private async ensureClients(): Promise<void> {
     if (!this._discovery) {
       if (!this._ytPromise) {
+        const cookieHeader = this.config.cookiesPath ? readCookieHeader(this.config.cookiesPath) : ''
         this._ytPromise = Innertube.create({
           generate_session_locally: true,
+          ...(this.innerTubeFetch ? { fetch: this.innerTubeFetch } : {}),
+          ...(cookieHeader ? { cookie: cookieHeader } : {}),
           ...(this.config.language ? { lang: this.config.language } : {}),
           ...(this.config.location ? { location: this.config.location } : {}),
         })
       }
       const yt = await this._ytPromise
       this._discovery = new DiscoveryClient(yt)
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath)
-      this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath)
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy)
+      this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy)
     }
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
@@ -361,7 +380,7 @@ export class MusicKit {
       const meta = await this.getMetadata(resolved)
       const artist = sanitizeArtist(meta.artist)
       const title = sanitizeTitle(meta.title)
-      lyrics = await fetchFromLrclib(artist, title, meta.duration) ?? await fetchFromLyricsOvh(artist, title)
+      lyrics = await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch)
     } catch {
       // ignore — return null below
     }
@@ -408,6 +427,7 @@ export class MusicKit {
       this._identifier = new Identifier({
         acoustidApiKey: this.config.identify.acoustidApiKey,
         songrecBin: this.config.identify.songrecBin,
+        fetch: this.sharedFetch,
       })
     }
 

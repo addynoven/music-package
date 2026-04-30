@@ -66,7 +66,7 @@ describe('MusicKit — getLyrics', () => {
     mockLrclib.mockResolvedValue(MOCK_LYRICS)
     const mk = new MusicKit()
     await mk.getLyrics('dQw4w9WgXcQ')
-    expect(mockLrclib).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho')
+    expect(mockLrclib).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho', 262, expect.any(Function))
   })
 
   it('falls back to lyrics.ovh when LRCLIB returns null', async () => {
@@ -74,7 +74,7 @@ describe('MusicKit — getLyrics', () => {
     mockLyricsOvh.mockResolvedValue({ plain: 'fallback lyrics', synced: null })
     const mk = new MusicKit()
     const lyrics = await mk.getLyrics('dQw4w9WgXcQ')
-    expect(mockLyricsOvh).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho')
+    expect(mockLyricsOvh).toHaveBeenCalledWith('Arijit Singh', 'Tum Hi Ho', expect.any(Function))
     expect(lyrics).toEqual({ plain: 'fallback lyrics', synced: null })
   })
 

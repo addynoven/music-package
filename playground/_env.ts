@@ -22,6 +22,9 @@ export function configFromEnv(overrides: PlaygroundConfig = {}): PlaygroundConfi
   if (process.env.YT_LANGUAGE) cfg.language = process.env.YT_LANGUAGE
   if (process.env.YT_LOCATION) cfg.location = process.env.YT_LOCATION
   if (process.env.LOG_LEVEL) cfg.logLevel = process.env.LOG_LEVEL as any
+  if (process.env.PROXY) cfg.proxy = process.env.PROXY
+  if (process.env.USER_AGENT) cfg.userAgent = process.env.USER_AGENT
+  if (process.env.VISITOR_ID) cfg.visitorId = process.env.VISITOR_ID
   if (process.env.ACOUSTID_API_KEY) {
     cfg.identify = {
       acoustidApiKey: process.env.ACOUSTID_API_KEY,

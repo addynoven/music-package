@@ -87,3 +87,10 @@ export async function fetchFromLrclib(
     return null
   }
 }
+
+import type { LyricsProvider } from './provider.js'
+
+export const lrclibProvider: LyricsProvider = {
+  name: 'lrclib',
+  fetch: fetchFromLrclib,
+}

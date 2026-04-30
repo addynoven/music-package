@@ -13,3 +13,10 @@ export async function fetchFromLyricsOvh(artist: string, title: string, fetchFn:
     return null
   }
 }
+
+import type { LyricsProvider } from './provider.js'
+
+export const lyricsOvhProvider: LyricsProvider = {
+  name: 'lyrics-ovh',
+  fetch: (artist, title, _duration?, fetchFn?) => fetchFromLyricsOvh(artist, title, fetchFn),
+}

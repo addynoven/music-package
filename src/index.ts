@@ -43,6 +43,7 @@ export {
 
 // Type exports
 export type { IdentifyResult } from './identifier'
+export type { LyricsProvider, LyricsProviderName } from './lyrics/provider'
 
 export type {
   // Data models
@@ -61,6 +62,7 @@ export type {
   Lyrics,
   LyricLine,
   LyricWord,
+  WordTime,
 
   // Options & config
   SearchOptions,

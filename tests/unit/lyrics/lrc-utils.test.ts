@@ -225,9 +225,9 @@ describe('parseLrc — enhanced word-level timestamps', () => {
 
   it('each word has correct time and text', () => {
     const lines = parseLrc(ENHANCED)
-    expect(lines[0].words![0]).toEqual({ time: 12.0, text: 'Never' })
-    expect(lines[0].words![1]).toEqual({ time: 12.5, text: 'gonna' })
-    expect(lines[0].words![4]).toEqual({ time: 14.0, text: 'up' })
+    expect(lines[0].words![0]).toEqual({ time: 12.0, duration: 0, text: 'Never' })
+    expect(lines[0].words![1]).toEqual({ time: 12.5, duration: 0, text: 'gonna' })
+    expect(lines[0].words![4]).toEqual({ time: 14.0, duration: 0, text: 'up' })
   })
 
   it('standard lines without <> tags have no words field', () => {

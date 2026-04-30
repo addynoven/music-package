@@ -1,6 +1,7 @@
-import type { Lyrics } from '../models/index.js'
+import type { Lyrics, LyricsProviderName } from '../models/index.js'
 
-export type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou'
+// Re-export so consumers can import from either location.
+export type { LyricsProviderName }
 
 export interface LyricsProvider {
   readonly name: LyricsProviderName
@@ -8,6 +9,7 @@ export interface LyricsProvider {
     artist: string,
     title: string,
     duration?: number,
-    fetchFn?: typeof globalThis.fetch
+    fetchFn?: typeof globalThis.fetch,
+    videoId?: string,
   ): Promise<Lyrics | null>
 }

@@ -66,9 +66,19 @@ export interface LyricLine {
   words?: WordTime[]  // present only when enhanced LRC word-level timestamps exist
 }
 
+export type LyricsProviderName =
+  | 'better-lyrics'
+  | 'lrclib'
+  | 'lyrics-ovh'
+  | 'kugou'
+  | 'simpmusic'
+  | 'youtube-native'
+  | 'youtube-subtitle'
+
 export interface Lyrics {
   plain: string
   synced: LyricLine[] | null  // null when source only has plain text
+  source?: LyricsProviderName  // name of the provider that produced this result
 }
 
 export interface StreamingData {

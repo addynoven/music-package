@@ -33,6 +33,11 @@ export { betterLyricsProvider, fetchFromBetterLyrics, BETTER_LYRICS_BASE } from 
 export { lrclibProvider, fetchFromLrclib } from './lyrics/lrclib'
 export { lyricsOvhProvider, fetchFromLyricsOvh } from './lyrics/lyrics-ovh'
 export { kugouProvider, fetchFromKuGou, KUGOU_SEARCH_BASE, KUGOU_LYRICS_BASE } from './lyrics/kugou'
+export { fetchFromSimpMusic, simpMusicProvider } from './lyrics/simpmusic'
+export { YouTubeNativeLyricsProvider } from './lyrics/youtube-native'
+export { YouTubeSubtitleLyricsProvider } from './lyrics/youtube-subtitle'
+export { LyricsRegistry } from './lyrics/registry'
+export type { RegistryPosition } from './lyrics/registry'
 export {
   ThumbnailSchema,
   SongSchema,

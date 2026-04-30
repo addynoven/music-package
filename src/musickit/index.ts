@@ -1,10 +1,10 @@
-import { Innertube } from 'youtubei.js'
 import { Cache } from '../cache'
 import { RateLimiter } from '../rate-limiter'
 import { RetryEngine } from '../retry'
 import { SessionManager } from '../session'
 import { DiscoveryClient } from '../discovery'
 import { StreamResolver } from '../stream'
+import { InnertubePool } from '../stream/innertube-pool'
 import { Downloader } from '../downloader'
 import { Identifier } from '../identifier'
 import { PodcastClient } from '../podcast'
@@ -105,9 +105,9 @@ export class MusicKit {
   private _downloader: Downloader | null = null
   private _identifier: Identifier | null = null
   private _podcast: PodcastClient | null = null
-  private _ytPromise: Promise<Innertube> | null = null
+  private _poolPromise: Promise<InnertubePool> | null = null
 
-  constructor(config: MusicKitConfig = {}, _yt?: Innertube) {
+  constructor(config: MusicKitConfig = {}, _yt?: unknown) {
     this.config = config
     this.sourceOrder = resolveSourceOrder(config.sourceOrder)
     const cacheConfig = config.cache ?? {}
@@ -133,9 +133,28 @@ export class MusicKit {
     this.innerTubeFetch = config.proxy ? makeFetch({ proxy: config.proxy }) : undefined
 
     if (_yt) {
-      this._discovery = new DiscoveryClient(_yt)
-      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, _yt, this.onStreamFallback)
-      this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath, config.proxy)
+      // Legacy single-Innertube constructor path (used primarily by tests).
+      // The passed _yt instance is ignored — a fresh InnertubePool is created
+      // instead so the constructor branch behaves the same as the static paths.
+      // NOTE(v4.2): This means _yt is no longer used directly; the pool will
+      // lazy-create its own YTMUSIC session on first use.
+      const pool = new InnertubePool({
+        fetch: this.innerTubeFetch,
+        // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
+        poToken: (config as any).poToken as string | undefined,
+        getPoToken: (config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
+      })
+      // Eagerly start the YTMUSIC session for discovery — don't await here since
+      // the constructor is sync. ensureClients will await as needed.
+      const ytPromise = pool.get('YTMUSIC')
+      this._poolPromise = ytPromise.then(() => pool)
+      ytPromise.then((yt) => {
+        this._discovery = new DiscoveryClient(yt)
+        this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy, pool, this.onStreamFallback)
+        this._downloader = new Downloader(this._stream, this._discovery!, config.cookiesPath, config.proxy)
+      }).catch(() => {
+        // Will be retried in ensureClients()
+      })
     }
 
     if (!config.youtubeApiKey && !config.cookiesPath) {
@@ -150,15 +169,18 @@ export class MusicKit {
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
     const instance = new MusicKit(config)
     const cookieHeader = config.cookiesPath ? readCookieHeader(config.cookiesPath) : ''
-    const yt = await Innertube.create({
-      generate_session_locally: true,
-      ...(instance.innerTubeFetch ? { fetch: instance.innerTubeFetch } : {}),
-      ...(cookieHeader ? { cookie: cookieHeader } : {}),
-      ...(config.language ? { lang: config.language } : {}),
-      ...(config.location ? { location: config.location } : {}),
+    // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
+    const pool = new InnertubePool({
+      fetch: instance.innerTubeFetch,
+      cookie: cookieHeader || undefined,
+      lang: config.language,
+      location: config.location,
+      poToken: (config as any).poToken as string | undefined,
+      getPoToken: (config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
     })
+    const yt = await pool.get('YTMUSIC')
     instance._discovery = new DiscoveryClient(yt)
-    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, yt, instance.onStreamFallback)
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, pool, instance.onStreamFallback)
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy)
     return instance
   }
@@ -214,19 +236,23 @@ export class MusicKit {
 
   private async ensureClients(): Promise<void> {
     if (!this._discovery) {
-      if (!this._ytPromise) {
+      if (!this._poolPromise) {
         const cookieHeader = this.config.cookiesPath ? readCookieHeader(this.config.cookiesPath) : ''
-        this._ytPromise = Innertube.create({
-          generate_session_locally: true,
-          ...(this.innerTubeFetch ? { fetch: this.innerTubeFetch } : {}),
-          ...(cookieHeader ? { cookie: cookieHeader } : {}),
-          ...(this.config.language ? { lang: this.config.language } : {}),
-          ...(this.config.location ? { location: this.config.location } : {}),
+        // TODO(v4.2): config.poToken / config.getPoToken — add to MusicKitConfig
+        const pool = new InnertubePool({
+          fetch: this.innerTubeFetch,
+          cookie: cookieHeader || undefined,
+          lang: this.config.language,
+          location: this.config.location,
+          poToken: (this.config as any).poToken as string | undefined,
+          getPoToken: (this.config as any).getPoToken as ((videoId: string, client: any) => Promise<string | null>) | undefined,
         })
+        this._poolPromise = pool.get('YTMUSIC').then(() => pool)
       }
-      const yt = await this._ytPromise
+      const pool = await this._poolPromise
+      const yt = await pool.get('YTMUSIC')
       this._discovery = new DiscoveryClient(yt)
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, yt, this.onStreamFallback)
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, pool, this.onStreamFallback)
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy)
     }
     if (this.sources.length === 0) {

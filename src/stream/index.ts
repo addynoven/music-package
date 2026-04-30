@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process'
-import type { Innertube } from 'youtubei.js'
 import { Cache } from '../cache'
 import { StreamError } from '../errors'
 import type { StreamingData, Quality } from '../models'
 import { resolveViaInnertube } from './innertube-resolver'
+import { tryClients, STREAM_CLIENT_FALLBACK_ORDER } from './multi-client'
+import type { StreamClient } from './multi-client'
+import type { InnertubePool } from './innertube-pool'
 
 function parseExpiry(url: string): number {
   try {
@@ -62,7 +64,7 @@ export class StreamResolver {
     private readonly cache: Cache,
     private readonly cookiesPath?: string,
     private readonly proxy?: string,
-    private readonly yt?: Innertube,
+    private readonly pool?: InnertubePool,
     private readonly onFallback?: (videoId: string, reason: string) => void,
   ) {}
 
@@ -71,11 +73,12 @@ export class StreamResolver {
    *
    * Chain (each step short-circuits on success):
    *   1. SQLite cache (~6h TTL) — `cache.get` then `isUrlExpired` check
-   *   2. InnerTube fast-path via `resolveViaInnertube` — typically <500ms.
-   *      Skipped if no Innertube instance was provided.
+   *   2. InnerTube fast-path via `tryClients` walking `STREAM_CLIENT_FALLBACK_ORDER`.
+   *      Each client is fetched from the pool then passed to `resolveViaInnertube`.
+   *      Skipped if no InnertubePool was provided.
    *   3. yt-dlp shell-out — universal fallback (~2-3s). Used when (2) is
-   *      unavailable or throws, or for tracks that genuinely can't be played
-   *      from InnerTube (geo-blocked, age-restricted, etc.).
+   *      unavailable or all clients failed, or for tracks that genuinely can't
+   *      be played from InnerTube (geo-blocked, age-restricted, etc.).
    */
   async resolve(videoId: string, quality: Quality | { codec?: string; quality?: Quality } = 'high'): Promise<StreamingData> {
     const raw: string = typeof quality === 'string' ? quality : (quality.quality ?? 'high')
@@ -89,13 +92,41 @@ export class StreamResolver {
 
     let data: StreamingData | undefined
 
-    if (this.yt) {
-      try {
-        const result = await resolveViaInnertube(this.yt, videoId, { quality: q })
-        data = result.stream
-      } catch (err) {
-        const reason = (err as Error).message
-        this.onFallback?.(videoId, reason)
+    if (this.pool) {
+      // Collect per-client errors locally so we can surface the last one to
+      // onFallback when all clients fail (tryClients returns null in that case
+      // and does not expose the accumulated errors to callers).
+      const clientErrors: { client: StreamClient; error: Error }[] = []
+
+      const tried = await tryClients(
+        STREAM_CLIENT_FALLBACK_ORDER,
+        async (client) => {
+          try {
+            const yt = await this.pool!.get(client)
+            const result = await resolveViaInnertube(yt, videoId, { quality: q, client })
+            return result.stream
+          } catch (err) {
+            clientErrors.push({
+              client,
+              error: err instanceof Error ? err : new Error(String(err)),
+            })
+            // Re-throw so tryClients also records it and moves to the next client
+            throw err
+          }
+        },
+      )
+
+      if (tried !== null) {
+        data = tried.result
+      } else {
+        // All clients failed — fire onFallback once with the most informative error.
+        if (this.onFallback) {
+          const last = clientErrors[clientErrors.length - 1]
+          const reason = last
+            ? `${last.client}: ${last.error.message}`
+            : 'All InnerTube clients failed'
+          this.onFallback(videoId, reason)
+        }
       }
     }
 

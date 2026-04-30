@@ -5,6 +5,16 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.2.1] — 2026-04-30
+
+Metadata-only release. No code changes.
+
+### Changed
+
+- **Expanded npm keywords** — added `word-by-word-lyrics`, `word-level-lyrics`, `karaoke`, `ttml`, `lrclib`, `betterlyrics`, `kugou`, `simpmusic`, `lyrics-provider`, `lyrics-api`, `youtubei`, `potoken`, `multi-client`, `anti-ban`, `rate-limiter`, `proxy`, `chromaprint`, `songrec`, `node22`. Improves npm discoverability for the v4.2.0 feature surface.
+
+---
+
 ## [4.2.0] — 2026-04-30
 
 Closes the two remaining gaps Echo Music had on us. Stream resolution gets a proper multi-client InnerTube pool with PoToken plumbing. Lyrics grows from 4 to 7 providers with a user-configurable chain.

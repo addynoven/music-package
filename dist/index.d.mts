@@ -784,7 +784,7 @@ declare class Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-var version = "4.2.0";
+var version = "4.2.1";
 
 /**
  * Returns the thumbnail whose width is closest to targetSize.

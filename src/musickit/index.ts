@@ -47,6 +47,16 @@ function makeReq(endpoint: string): MusicKitRequest {
   return { method: 'GET', endpoint, headers: {}, body: null }
 }
 
+function isQuotaOrRateLimit(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const name = err.constructor?.name ?? ''
+  if (name === 'NetworkError') {
+    const status = (err as any).status as number | undefined
+    return status === 403 || status === 429
+  }
+  return false
+}
+
 function resolveSourceOrder(pref?: SourcePreference): SourceName[] {
   if (!pref || pref === 'best') return ['youtube']
   return pref
@@ -136,15 +146,48 @@ export class MusicKit {
   }
 
   private sourceFor(query: string, override?: SourceName): AudioSource {
+    if (override === 'youtube') {
+      const yt = this.sources.find(s => s.name.startsWith('youtube'))
+      if (!yt) throw new ValidationError(`Source 'youtube' is not registered — check your sourceOrder config`, 'sourceOrder')
+      return yt
+    }
     if (override) {
-      const targetName = 'youtube-music'
-      const found = this.sources.find(s => s.name === targetName)
+      const found = this.sources.find(s => s.name === override)
       if (!found) throw new ValidationError(`Source '${override}' is not registered — check your sourceOrder config`, 'sourceOrder')
       return found
     }
     const source = this.sources.find(s => s.canHandle(query))
     if (!source) throw new NotFoundError(`No source can handle: ${query}`, query)
     return source
+  }
+
+  private pickSearchSource(query: string, override?: SourceName, filter?: SearchFilter): AudioSource {
+    if (override) return this.sourceFor(query, override)
+    // Data API only handles songs — for other filters go straight to YT Music
+    if (filter && filter !== 'songs') {
+      const ytMusic = this.sources.find(s => s.name === 'youtube-music')
+      if (ytMusic) return ytMusic
+    }
+    return this.sourceFor(query)
+  }
+
+  private async tryEachSource<T>(
+    method: keyof AudioSource,
+    call: (src: AudioSource) => Promise<T>,
+    isQuotaError: (err: unknown) => boolean = isQuotaOrRateLimit,
+  ): Promise<T> {
+    let lastErr: unknown
+    for (const src of this.sources) {
+      if (typeof src[method] !== 'function') continue
+      try {
+        return await call(src)
+      } catch (err) {
+        lastErr = err
+        if (!isQuotaError(err)) throw err
+        // quota/rate-limit from this source — try next
+      }
+    }
+    throw lastErr ?? new NotFoundError('No source could handle request', method as string)
   }
 
   private async ensureClients(): Promise<void> {
@@ -167,11 +210,12 @@ export class MusicKit {
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
         if (name === 'youtube') {
-          this.sources.push(
-            this.config.youtubeApiKey
-              ? new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream!)
-              : new YouTubeMusicSource(this._discovery!, this._stream!),
-          )
+          if (this.config.youtubeApiKey) {
+            this.sources.push(new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream!))
+            this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+          } else {
+            this.sources.push(new YouTubeMusicSource(this._discovery!, this._stream!))
+          }
         }
       }
     }
@@ -212,7 +256,9 @@ export class MusicKit {
     const cached = this.cache.get<string[]>(cacheKey)
     if (cached) return cached
     await this.ensureClients()
-    const result = await this.call('autocomplete', () => this._discovery!.autocomplete(resolved))
+    const result = await this.call('autocomplete', () =>
+      this.tryEachSource('autocomplete', src => src.autocomplete!(resolved)),
+    )
     this.cache.set(cacheKey, result, 60)
     return result
   }
@@ -244,7 +290,8 @@ export class MusicKit {
     await this.ensureClients()
 
     const { source: sourceOverride, ...searchOpts } = options ?? {}
-    const result = await this.call('search', () => this.sourceFor(resolved, sourceOverride).search(resolved, searchOpts))
+    const src = this.pickSearchSource(resolved, sourceOverride, searchOpts.filter)
+    const result = await this.call('search', () => src.search(resolved, searchOpts))
     this.searchCache.set(cacheKey, result as any)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
@@ -263,7 +310,7 @@ export class MusicKit {
     const id = resolveInput(videoId)
     const src = this.sourceFor(id)
     const [song, streamData] = await Promise.all([
-      this.call('browse', () => this._discovery!.getInfo(id)),
+      this.call('browse', () => this.tryEachSource('getMetadata', s => s.getMetadata!(id))),
       this.call('stream', () => src.getStream(id, 'high')),
     ])
     return { ...song, stream: streamData }
@@ -276,7 +323,9 @@ export class MusicKit {
     const cached = this.cache.get<Section[]>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getHome())
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getHome', src => src.getHome!()),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.HOME)
     return result
   }
@@ -289,7 +338,9 @@ export class MusicKit {
     const cached = this.cache.get<Artist>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getArtist(id))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getArtist', src => src.getArtist!(id)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
     return result
   }
@@ -301,7 +352,9 @@ export class MusicKit {
     const cached = this.cache.get<Album>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getAlbum(id))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getAlbum', src => src.getAlbum!(id)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
     return result
   }
@@ -313,7 +366,9 @@ export class MusicKit {
     const cached = this.cache.get<Playlist>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getPlaylist(id))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getPlaylist', src => src.getPlaylist!(id)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST)
     return result
   }
@@ -325,7 +380,9 @@ export class MusicKit {
     const cached = this.cache.get<Song[]>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getRadio(id))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getRadio', src => src.getRadio!(id)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
   }
@@ -337,7 +394,9 @@ export class MusicKit {
     const cached = this.cache.get<Song[]>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getRelated(id))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getRelated', src => src.getRelated!(id)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
   }
@@ -361,7 +420,9 @@ export class MusicKit {
     const cached = this.cache.get<Song>(cacheKey)
     if (cached) return cached
 
-    const result = await this.call('browse', () => this._discovery!.getInfo(resolved))
+    const result = await this.call('browse', () =>
+      this.tryEachSource('getMetadata', src => src.getMetadata!(resolved)),
+    )
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
   }
@@ -391,17 +452,23 @@ export class MusicKit {
 
   async getCharts(options?: BrowseOptions): Promise<Section[]> {
     await this.ensureClients()
-    return this.call('browse', () => this._discovery!.getCharts(options))
+    return this.call('browse', () =>
+      this.tryEachSource('getCharts', src => src.getCharts!(options)),
+    )
   }
 
   async getMoodCategories(): Promise<{ title: string; params: string }[]> {
     await this.ensureClients()
-    return this.call('browse', () => this._discovery!.getMoodCategories())
+    return this.call('browse', () =>
+      this.tryEachSource('getMoodCategories', src => src.getMoodCategories!()),
+    )
   }
 
   async getMoodPlaylists(params: string): Promise<Section[]> {
     await this.ensureClients()
-    return this.call('browse', () => this._discovery!.getMoodPlaylists(params))
+    return this.call('browse', () =>
+      this.tryEachSource('getMoodPlaylists', src => src.getMoodPlaylists!(params)),
+    )
   }
 
   async download(videoId: string, options?: DownloadOptions): Promise<void> {

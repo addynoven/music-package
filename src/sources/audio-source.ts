@@ -1,4 +1,4 @@
-import type { Song, StreamingData, SearchResults, SearchFilter, Album, Artist, Playlist, Section } from '../models'
+import type { Song, StreamingData, SearchResults, SearchFilter, Album, Artist, Playlist, Section, BrowseOptions } from '../models'
 
 export interface AudioSource {
   readonly name: string
@@ -10,7 +10,10 @@ export interface AudioSource {
   getArtist?(id: string): Promise<Artist>
   getPlaylist?(id: string): Promise<Playlist>
   getRadio?(id: string): Promise<Song[]>
-  getHome?(language?: string): Promise<Section[]>
-  getFeaturedPlaylists?(language?: string): Promise<Playlist[]>
-  getLyrics?(id: string): Promise<string | null>
+  getRelated?(id: string): Promise<Song[]>
+  getHome?(): Promise<Section[]>
+  getCharts?(options?: BrowseOptions): Promise<Section[]>
+  getMoodCategories?(): Promise<{ title: string; params: string }[]>
+  getMoodPlaylists?(params: string): Promise<Section[]>
+  autocomplete?(query: string): Promise<string[]>
 }

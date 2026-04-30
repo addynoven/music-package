@@ -44,7 +44,8 @@ Mark `[x]` when complete, `[~]` when in progress.
 
 ---
 
-## T2 — Co-register both YouTube sources  [Sev 1.2 + 1.3] [ ]
+## T2 — Co-register both YouTube sources  [Sev 1.2 + 1.3] [x]
+<!-- 2026-04-30: ensureClients() registers [YouTubeDataAPISource, YouTubeMusicSource] when youtubeApiKey set; pickSearchSource() routes non-songs filters to YT Music; quota errors (403/429) fall through to next source via tryEachSource() -->
 
 **Goal:** when `youtubeApiKey` is set, register *both* `YouTubeDataAPISource` and `YouTubeMusicSource`. Data API gets first priority for `songs` search; YT Music handles albums/artists/playlists/all browse + serves as Data-API quota fallback.
 
@@ -69,7 +70,8 @@ Mark `[x]` when complete, `[~]` when in progress.
 
 ---
 
-## T3 — Route browse/metadata methods through `sourceFor()`  [Sev 2.1] [ ]
+## T3 — Route browse/metadata methods through `sourceFor()`  [Sev 2.1] [x]
+<!-- 2026-04-30: Added tryEachSource() to MusicKit; YouTubeMusicSource implements getAlbum/getArtist/getPlaylist/getRadio/getRelated/getHome/getCharts/getMoodCategories/getMoodPlaylists/autocomplete; all 11 MusicKit browse methods now route through tryEachSource() instead of _discovery directly -->
 
 **Goal:** `getMetadata`, `getHome`, `getArtist`, `getAlbum`, `getPlaylist`, `getRadio`, `getRelated`, `getCharts`, `getMoodCategories`, `getMoodPlaylists`, `autocomplete` all go through the configured source list (which after T2 includes both backends).
 
@@ -91,7 +93,8 @@ Mark `[x]` when complete, `[~]` when in progress.
 
 ---
 
-## T4 — Fix `sourceFor()` override  [Sev 2.2] [ ]
+## T4 — Fix `sourceFor()` override  [Sev 2.2] [x]
+<!-- 2026-04-30: sourceFor() now maps override === 'youtube' to first source with name.startsWith('youtube'); other named overrides do exact match; hardcoded 'youtube-music' removed -->
 
 **Goal:** `mk.search(q, { source: 'youtube' })` actually honors the override.
 

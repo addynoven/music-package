@@ -361,7 +361,7 @@ export class MusicKit {
       const meta = await this.getMetadata(resolved)
       const artist = sanitizeArtist(meta.artist)
       const title = sanitizeTitle(meta.title)
-      lyrics = await fetchFromLrclib(artist, title) ?? await fetchFromLyricsOvh(artist, title)
+      lyrics = await fetchFromLrclib(artist, title, meta.duration) ?? await fetchFromLyricsOvh(artist, title)
     } catch {
       // ignore — return null below
     }

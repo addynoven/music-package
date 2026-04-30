@@ -3,6 +3,7 @@ dist/
 *.log
 .env
 .env.*
+!.env.example
 coverage/
 .vite/
 cookie.json

@@ -15,6 +15,29 @@ function mapThumbnails(thumbs: Record<string, { url: string; width: number; heig
   return Object.values(thumbs).map(t => ({ url: t.url, width: t.width, height: t.height }))
 }
 
+// YouTube Music auto-generates "<Artist> - Topic" channels for label uploads —
+// these are the most trustworthy artist signal the Data API exposes.
+const TOPIC_SUFFIX = / - Topic$/
+const TITLE_NOISE = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster|m\/?v|visualizer)[^\)\]】]*[\)\]】]/gi
+
+function extractArtistTitle(rawTitle: string, channelTitle: string): { title: string; artist: string } {
+  const cleanTitle = rawTitle.replace(TITLE_NOISE, '').trim()
+
+  if (TOPIC_SUFFIX.test(channelTitle)) {
+    return { artist: channelTitle.replace(TOPIC_SUFFIX, '').trim(), title: cleanTitle }
+  }
+
+  const dash = cleanTitle.indexOf(' - ')
+  if (dash !== -1) {
+    return {
+      artist: cleanTitle.slice(0, dash).trim(),
+      title: cleanTitle.slice(dash + 3).trim(),
+    }
+  }
+
+  return { title: cleanTitle, artist: channelTitle.trim() }
+}
+
 async function ytFetch<T>(url: URL): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
@@ -68,6 +91,7 @@ export class YouTubeDataAPISource implements AudioSource {
     searchUrl.searchParams.set('part', 'snippet')
     searchUrl.searchParams.set('q', query)
     searchUrl.searchParams.set('type', 'video')
+    searchUrl.searchParams.set('videoCategoryId', '10') // 10 = YouTube "Music" category
     searchUrl.searchParams.set('maxResults', String(maxResults))
     searchUrl.searchParams.set('key', this.apiKey)
 
@@ -96,11 +120,12 @@ export class YouTubeDataAPISource implements AudioSource {
       .map(id => {
         const detail = detailMap.get(id)
         if (!detail) return null
+        const { title, artist } = extractArtistTitle(detail.snippet.title, detail.snippet.channelTitle)
         return {
           type: 'song' as const,
           videoId: id,
-          title: detail.snippet.title,
-          artist: detail.snippet.channelTitle,
+          title,
+          artist,
           duration: parseDuration(detail.contentDetails?.duration ?? ''),
           thumbnails: mapThumbnails(detail.snippet.thumbnails ?? {}),
         } satisfies Song
@@ -120,11 +145,12 @@ export class YouTubeDataAPISource implements AudioSource {
     const item = data.items?.[0]
     if (!item) throw new NotFoundError(`Video not found: ${id}`, id)
 
+    const { title, artist } = extractArtistTitle(item.snippet.title, item.snippet.channelTitle)
     return {
       type: 'song',
       videoId: id,
-      title: item.snippet.title,
-      artist: item.snippet.channelTitle,
+      title,
+      artist,
       duration: parseDuration(item.contentDetails?.duration ?? ''),
       thumbnails: mapThumbnails(item.snippet.thumbnails ?? {}),
     }

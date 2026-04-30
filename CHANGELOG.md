@@ -23,7 +23,8 @@ Stream resolution and lyrics get teeth. The "4-step waterfall" CLAUDE.md describ
 - **BetterLyrics** (`src/lyrics/better-lyrics.ts`) — fetches Apple Music TTML from `lyrics-api.boidu.dev` and parses real per-word `<span begin end>` timestamps. Echo Music fetches this provider but discards the word data; we surface it.
 - **KuGou** (`src/lyrics/kugou.ts`) — Chinese music coverage via `mobileservice.kugou.com` + `lyrics.kugou.com`. Three-step flow: song search → lyric candidate by hash → base64-encoded LRC. Handles multi-timestamp LRC lines (`[00:01.00][00:30.00]text`).
 - **`LyricsProvider` interface** (`src/lyrics/provider.ts`) — uniform contract `{ name, fetch(artist, title, duration?, fetchFn?) }`. Existing providers expose `lrclibProvider` and `lyricsOvhProvider` conforming exports alongside their original function exports (no breaking change).
-- **`WordTime` type** + optional `LyricLine.words` field — additive type extension, public via the SDK barrel.
+- **`WordTime` type** + optional `LyricLine.words` field — additive type extension, public via the SDK barrel. `LyricWord` is preserved as a `@deprecated` alias of `WordTime`, so existing imports keep working. `WordTime.duration` is optional — only providers with real per-word duration data (BetterLyrics) populate it.
+- **Conforming `LyricsProvider` exports** — every built-in provider now exports a const conforming to the `LyricsProvider` interface: `betterLyricsProvider`, `lrclibProvider`, `lyricsOvhProvider`, `kugouProvider`. Useful for consumers who want to drive their own chain.
 - `MusicKit.getLyrics()` chain: BetterLyrics → LRCLIB → lyrics.ovh → KuGou. First non-null wins. 10-year cache TTL unchanged.
 
 ### Fixed — documentation lie

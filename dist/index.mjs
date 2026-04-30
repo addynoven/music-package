@@ -1526,6 +1526,10 @@ async function fetchFromLrclib(artist, title, duration, fetchFn = globalThis.fet
     return null;
   }
 }
+var lrclibProvider = {
+  name: "lrclib",
+  fetch: fetchFromLrclib
+};
 
 // src/lyrics/lyrics-ovh.ts
 async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
@@ -1541,6 +1545,10 @@ async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
     return null;
   }
 }
+var lyricsOvhProvider = {
+  name: "lyrics-ovh",
+  fetch: (artist, title, _duration, fetchFn) => fetchFromLyricsOvh(artist, title, fetchFn)
+};
 
 // src/lyrics/better-lyrics.ts
 var BETTER_LYRICS_BASE = "https://lyrics-api.boidu.dev";
@@ -1627,6 +1635,10 @@ async function fetchFromBetterLyrics(artist, title, duration, fetchFn = globalTh
     return null;
   }
 }
+var betterLyricsProvider = {
+  name: "better-lyrics",
+  fetch: fetchFromBetterLyrics
+};
 
 // src/lyrics/kugou.ts
 var KUGOU_SEARCH_BASE = "https://mobileservice.kugou.com";
@@ -1714,6 +1726,10 @@ async function fetchFromKuGou(artist, title, duration, fetchFn = globalThis.fetc
     return null;
   }
 }
+var kugouProvider = {
+  name: "kugou",
+  fetch: fetchFromKuGou
+};
 function getSongs(data) {
   if (typeof data !== "object" || data === null || !("data" in data)) return [];
   const d = data.data;
@@ -2488,11 +2504,14 @@ function isStreamExpired(stream) {
 export {
   AlbumSchema,
   ArtistSchema,
+  BETTER_LYRICS_BASE,
   Cache,
   DiscoveryClient,
   Downloader,
   HttpError,
   Identifier,
+  KUGOU_LYRICS_BASE,
+  KUGOU_SEARCH_BASE,
   Logger,
   MusicKit,
   MusicKitBaseError,
@@ -2514,11 +2533,19 @@ export {
   StreamResolver,
   ThumbnailSchema,
   ValidationError,
+  betterLyricsProvider,
+  fetchFromBetterLyrics,
+  fetchFromKuGou,
+  fetchFromLrclib,
+  fetchFromLyricsOvh,
   formatTimestamp,
   getActiveLine,
   getActiveLineIndex,
   getBestThumbnail,
   isStreamExpired,
+  kugouProvider,
+  lrclibProvider,
+  lyricsOvhProvider,
   offsetLrc,
   parseLrc,
   resolveInput,

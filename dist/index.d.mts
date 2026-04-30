@@ -76,15 +76,15 @@ interface Section {
     title: string;
     items: (Song | Album | Artist | Playlist)[];
 }
-interface LyricWord {
-    time: number;
-    text: string;
-}
 interface WordTime {
     time: number;
-    duration: number;
+    duration?: number;
     text: string;
 }
+/**
+ * @deprecated Use `WordTime`. `LyricWord` is kept as an alias for v4.0.x compat.
+ */
+type LyricWord = WordTime;
 interface LyricLine {
     time: number;
     text: string;
@@ -632,6 +632,29 @@ declare function formatTimestamp(seconds: number): string;
 declare function offsetLrc(lines: LyricLine[], offsetMs: number): LyricLine[];
 declare function serializeLrc(lines: LyricLine[]): string;
 
+type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou';
+interface LyricsProvider {
+    readonly name: LyricsProviderName;
+    fetch(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
+}
+
+declare const BETTER_LYRICS_BASE = "https://lyrics-api.boidu.dev";
+declare function fetchFromBetterLyrics(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
+declare const betterLyricsProvider: LyricsProvider;
+
+declare function fetchFromLrclib(artist: string, title: string, duration?: number, fetchFn?: typeof fetch): Promise<Lyrics | null>;
+
+declare const lrclibProvider: LyricsProvider;
+
+declare function fetchFromLyricsOvh(artist: string, title: string, fetchFn?: typeof fetch): Promise<Lyrics | null>;
+
+declare const lyricsOvhProvider: LyricsProvider;
+
+declare const KUGOU_SEARCH_BASE = "https://mobileservice.kugou.com";
+declare const KUGOU_LYRICS_BASE = "https://lyrics.kugou.com";
+declare function fetchFromKuGou(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
+declare const kugouProvider: LyricsProvider;
+
 declare const ThumbnailSchema: z.ZodObject<{
     url: z.ZodString;
     width: z.ZodNumber;
@@ -691,10 +714,4 @@ declare function safeParseAlbum(data: unknown): Album | null;
 declare function safeParseArtist(data: unknown): Artist | null;
 declare function safeParsePlaylist(data: unknown): Playlist | null;
 
-type LyricsProviderName = 'better-lyrics' | 'lrclib' | 'lyrics-ovh' | 'kugou';
-interface LyricsProvider {
-    readonly name: LyricsProviderName;
-    fetch(artist: string, title: string, duration?: number, fetchFn?: typeof globalThis.fetch): Promise<Lyrics | null>;
-}
-
-export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };
+export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, BETTER_LYRICS_BASE, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, KUGOU_LYRICS_BASE, KUGOU_SEARCH_BASE, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, betterLyricsProvider, fetchFromBetterLyrics, fetchFromKuGou, fetchFromLrclib, fetchFromLyricsOvh, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, kugouProvider, lrclibProvider, lyricsOvhProvider, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, version };

@@ -1,19 +1,5 @@
-export interface WordTime {
-  time: number      // seconds from track start
-  duration: number  // seconds
-  text: string      // single word, no whitespace
-}
-
-export interface LyricLine {
-  time: number
-  text: string
-  words?: WordTime[]
-}
-
-export interface Lyrics {
-  plain: string
-  synced: LyricLine[] | null
-}
+import type { Lyrics, LyricLine, WordTime } from '../models'
+import type { LyricsProvider } from './provider'
 
 export const BETTER_LYRICS_BASE = 'https://lyrics-api.boidu.dev'
 
@@ -158,4 +144,9 @@ export async function fetchFromBetterLyrics(
   } catch {
     return null
   }
+}
+
+export const betterLyricsProvider: LyricsProvider = {
+  name: 'better-lyrics',
+  fetch: fetchFromBetterLyrics,
 }

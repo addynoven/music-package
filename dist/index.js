@@ -32,11 +32,14 @@ var index_exports = {};
 __export(index_exports, {
   AlbumSchema: () => AlbumSchema,
   ArtistSchema: () => ArtistSchema,
+  BETTER_LYRICS_BASE: () => BETTER_LYRICS_BASE,
   Cache: () => Cache,
   DiscoveryClient: () => DiscoveryClient,
   Downloader: () => Downloader,
   HttpError: () => HttpError,
   Identifier: () => Identifier,
+  KUGOU_LYRICS_BASE: () => KUGOU_LYRICS_BASE,
+  KUGOU_SEARCH_BASE: () => KUGOU_SEARCH_BASE,
   Logger: () => Logger,
   MusicKit: () => MusicKit,
   MusicKitBaseError: () => MusicKitBaseError,
@@ -58,11 +61,19 @@ __export(index_exports, {
   StreamResolver: () => StreamResolver,
   ThumbnailSchema: () => ThumbnailSchema,
   ValidationError: () => ValidationError,
+  betterLyricsProvider: () => betterLyricsProvider,
+  fetchFromBetterLyrics: () => fetchFromBetterLyrics,
+  fetchFromKuGou: () => fetchFromKuGou,
+  fetchFromLrclib: () => fetchFromLrclib,
+  fetchFromLyricsOvh: () => fetchFromLyricsOvh,
   formatTimestamp: () => formatTimestamp,
   getActiveLine: () => getActiveLine,
   getActiveLineIndex: () => getActiveLineIndex,
   getBestThumbnail: () => getBestThumbnail,
   isStreamExpired: () => isStreamExpired,
+  kugouProvider: () => kugouProvider,
+  lrclibProvider: () => lrclibProvider,
+  lyricsOvhProvider: () => lyricsOvhProvider,
   offsetLrc: () => offsetLrc,
   parseLrc: () => parseLrc,
   resolveInput: () => resolveInput,
@@ -1604,6 +1615,10 @@ async function fetchFromLrclib(artist, title, duration, fetchFn = globalThis.fet
     return null;
   }
 }
+var lrclibProvider = {
+  name: "lrclib",
+  fetch: fetchFromLrclib
+};
 
 // src/lyrics/lyrics-ovh.ts
 async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
@@ -1619,6 +1634,10 @@ async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
     return null;
   }
 }
+var lyricsOvhProvider = {
+  name: "lyrics-ovh",
+  fetch: (artist, title, _duration, fetchFn) => fetchFromLyricsOvh(artist, title, fetchFn)
+};
 
 // src/lyrics/better-lyrics.ts
 var BETTER_LYRICS_BASE = "https://lyrics-api.boidu.dev";
@@ -1705,6 +1724,10 @@ async function fetchFromBetterLyrics(artist, title, duration, fetchFn = globalTh
     return null;
   }
 }
+var betterLyricsProvider = {
+  name: "better-lyrics",
+  fetch: fetchFromBetterLyrics
+};
 
 // src/lyrics/kugou.ts
 var KUGOU_SEARCH_BASE = "https://mobileservice.kugou.com";
@@ -1792,6 +1815,10 @@ async function fetchFromKuGou(artist, title, duration, fetchFn = globalThis.fetc
     return null;
   }
 }
+var kugouProvider = {
+  name: "kugou",
+  fetch: fetchFromKuGou
+};
 function getSongs(data) {
   if (typeof data !== "object" || data === null || !("data" in data)) return [];
   const d = data.data;
@@ -2567,11 +2594,14 @@ function isStreamExpired(stream) {
 0 && (module.exports = {
   AlbumSchema,
   ArtistSchema,
+  BETTER_LYRICS_BASE,
   Cache,
   DiscoveryClient,
   Downloader,
   HttpError,
   Identifier,
+  KUGOU_LYRICS_BASE,
+  KUGOU_SEARCH_BASE,
   Logger,
   MusicKit,
   MusicKitBaseError,
@@ -2593,11 +2623,19 @@ function isStreamExpired(stream) {
   StreamResolver,
   ThumbnailSchema,
   ValidationError,
+  betterLyricsProvider,
+  fetchFromBetterLyrics,
+  fetchFromKuGou,
+  fetchFromLrclib,
+  fetchFromLyricsOvh,
   formatTimestamp,
   getActiveLine,
   getActiveLineIndex,
   getBestThumbnail,
   isStreamExpired,
+  kugouProvider,
+  lrclibProvider,
+  lyricsOvhProvider,
   offsetLrc,
   parseLrc,
   resolveInput,

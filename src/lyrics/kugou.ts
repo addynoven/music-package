@@ -1,14 +1,5 @@
-// Local type definitions — Wave 2 will reconcile with src/models imports
-export interface LyricLine {
-  time: number
-  text: string
-  words?: { time: number; duration: number; text: string }[]
-}
-
-export interface Lyrics {
-  plain: string
-  synced: LyricLine[] | null
-}
+import type { Lyrics, LyricLine } from '../models'
+import type { LyricsProvider } from './provider'
 
 export const KUGOU_SEARCH_BASE = 'https://mobileservice.kugou.com'
 export const KUGOU_LYRICS_BASE = 'https://lyrics.kugou.com'
@@ -164,6 +155,11 @@ export async function fetchFromKuGou(
   } catch {
     return null
   }
+}
+
+export const kugouProvider: LyricsProvider = {
+  name: 'kugou',
+  fetch: fetchFromKuGou,
 }
 
 // ── Defensive JSON accessors ──────────────────────────────────────────────────

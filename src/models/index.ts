@@ -49,16 +49,16 @@ export interface Section {
   items: (Song | Album | Artist | Playlist)[]
 }
 
-export interface LyricWord {
-  time: number
+export interface WordTime {
+  time: number          // seconds from track start
+  duration?: number     // seconds; optional — only providers with word-level duration set this (BetterLyrics)
   text: string
 }
 
-export interface WordTime {
-  time: number
-  duration: number
-  text: string
-}
+/**
+ * @deprecated Use `WordTime`. `LyricWord` is kept as an alias for v4.0.x compat.
+ */
+export type LyricWord = WordTime
 
 export interface LyricLine {
   time: number  // seconds (e.g. 17.73)

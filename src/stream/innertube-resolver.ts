@@ -1,8 +1,7 @@
 import type { Innertube } from 'youtubei.js'
 import { StreamError } from '../errors'
 import type { StreamingData, Quality } from '../models'
-
-export type StreamClient = 'YTMUSIC' | 'ANDROID_VR' | 'TVHTML5' | 'WEB_REMIX'
+import type { StreamClient } from './multi-client'
 
 export interface InnertubeResolveOptions {
   quality?: Quality

@@ -29,6 +29,10 @@ export { isStreamExpired } from './utils/stream-utils'
 export { resolveInput, resolveSpotifyUrl } from './utils/url-resolver'
 export { PodcastClient } from './podcast'
 export { parseLrc, getActiveLine, getActiveLineIndex, formatTimestamp, offsetLrc, serializeLrc } from './lyrics/lrc-utils'
+export { betterLyricsProvider, fetchFromBetterLyrics, BETTER_LYRICS_BASE } from './lyrics/better-lyrics'
+export { lrclibProvider, fetchFromLrclib } from './lyrics/lrclib'
+export { lyricsOvhProvider, fetchFromLyricsOvh } from './lyrics/lyrics-ovh'
+export { kugouProvider, fetchFromKuGou, KUGOU_SEARCH_BASE, KUGOU_LYRICS_BASE } from './lyrics/kugou'
 export {
   ThumbnailSchema,
   SongSchema,

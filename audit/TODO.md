@@ -148,7 +148,8 @@ Mark `[x]` when complete, `[~]` when in progress.
 
 ---
 
-## T7 — Throttle non-search endpoints  [Sev 3.3] [ ]
+## T7 — Throttle non-search endpoints  [Sev 3.3] [x]
+<!-- 2026-04-30: Added limiter.throttle('autocomplete',...) to autocomplete(); limiter.throttle('browse',...) to getMetadata/getHome/getArtist/getAlbum/getPlaylist/getRadio/getRelated/getSuggestions/getCharts/getMoodCategories/getMoodPlaylists (after cache short-circuit, before ensureClients); limiter.throttle('stream',...) to getStream/streamAudio/streamPCM/download. playground/test-throttle.ts confirms rateLimited events fire on correct buckets. -->
 
 **Goal:** `rateLimit.browse`, `rateLimit.stream`, `rateLimit.autocomplete` actually do something.
 
@@ -162,7 +163,8 @@ Mark `[x]` when complete, `[~]` when in progress.
 
 ---
 
-## T8 — Cleanup: delete unreachable code  [Sev 3.5 + 4] [ ]
+## T8 — Cleanup: delete unreachable code  [Sev 3.5 + 4] [x]
+<!-- 2026-04-30: Removed 'visitorIdRefreshed' from EventMap in src/events/index.ts and from MusicKitEvent union in src/models/index.ts (never emitted anywhere). Added LRU cap (256 entries) to searchCache via searchCacheSet()/searchCacheGet() helpers that use Map insertion-order eviction. audio-source.ts optional methods and youtube-data-api.ts getMetadata were already cleaned by B; no additional prune needed. -->
 
 **Goal:** remove dead code so future readers aren't misled.
 

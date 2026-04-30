@@ -76,6 +76,26 @@ export class MusicKit {
   private readonly innerTubeFetch: typeof fetch | undefined
   private readonly searchCache = new Map<string, SearchResults | Song[] | Album[] | Artist[]>()
   private readonly sourceOrder: SourceName[]
+
+  private static readonly SEARCH_CACHE_MAX = 256
+
+  private searchCacheSet(key: string, value: SearchResults | Song[] | Album[] | Artist[]): void {
+    if (this.searchCache.size >= MusicKit.SEARCH_CACHE_MAX) {
+      // Delete the oldest entry (Map preserves insertion order)
+      this.searchCache.delete(this.searchCache.keys().next().value!)
+    }
+    this.searchCache.set(key, value)
+  }
+
+  private searchCacheGet(key: string): SearchResults | Song[] | Album[] | Artist[] | undefined {
+    const val = this.searchCache.get(key)
+    if (val !== undefined) {
+      // Refresh recency: move to end
+      this.searchCache.delete(key)
+      this.searchCache.set(key, val)
+    }
+    return val
+  }
   readonly sources: AudioSource[] = []
 
   private _discovery: DiscoveryClient | null = null
@@ -255,6 +275,7 @@ export class MusicKit {
     const cacheKey = `autocomplete:${resolved}`
     const cached = this.cache.get<string[]>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('autocomplete', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const result = await this.call('autocomplete', () =>
       this.tryEachSource('autocomplete', src => src.autocomplete!(resolved)),
@@ -272,7 +293,7 @@ export class MusicKit {
     const resolved = resolveInput(query)
     const cacheKey = `search:${resolved}:${options?.filter ?? 'all'}:${options?.limit ?? 'default'}:${options?.source ?? 'auto'}`
 
-    const inMemory = this.searchCache.get(cacheKey)
+    const inMemory = this.searchCacheGet(cacheKey)
     if (inMemory !== undefined) {
       this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
       return inMemory
@@ -280,7 +301,7 @@ export class MusicKit {
 
     const persisted = this.cache.get<SearchResults | Song[] | Album[] | Artist[]>(cacheKey)
     if (persisted) {
-      this.searchCache.set(cacheKey, persisted)
+      this.searchCacheSet(cacheKey, persisted)
       this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
       return persisted
     }
@@ -292,12 +313,13 @@ export class MusicKit {
     const { source: sourceOverride, ...searchOpts } = options ?? {}
     const src = this.pickSearchSource(resolved, sourceOverride, searchOpts.filter)
     const result = await this.call('search', () => src.search(resolved, searchOpts))
-    this.searchCache.set(cacheKey, result as any)
+    this.searchCacheSet(cacheKey, result as any)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
     return result
   }
 
   async getStream(videoId: string, options?: { quality?: Quality }): Promise<StreamingData> {
+    await this.limiter.throttle('stream', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const id = resolveInput(videoId)
     const quality = options?.quality ?? 'high'
@@ -317,11 +339,12 @@ export class MusicKit {
   }
 
   async getHome(options?: { language?: string; source?: SourceName }): Promise<Section[]> {
-    await this.ensureClients()
     const lang = options?.language
     const cacheKey = `home:${lang ?? 'default'}:${options?.source ?? 'auto'}`
     const cached = this.cache.get<Section[]>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getHome', src => src.getHome!()),
@@ -332,11 +355,12 @@ export class MusicKit {
 
 
   async getArtist(channelId: string): Promise<Artist> {
-    await this.ensureClients()
     const id = resolveInput(channelId)
     const cacheKey = `artist:${id}`
     const cached = this.cache.get<Artist>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getArtist', src => src.getArtist!(id)),
@@ -346,11 +370,12 @@ export class MusicKit {
   }
 
   async getAlbum(browseId: string): Promise<Album> {
-    await this.ensureClients()
     const id = resolveInput(browseId)
     const cacheKey = `album:${id}`
     const cached = this.cache.get<Album>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getAlbum', src => src.getAlbum!(id)),
@@ -360,11 +385,12 @@ export class MusicKit {
   }
 
   async getPlaylist(playlistId: string): Promise<Playlist> {
-    await this.ensureClients()
     const id = resolveInput(playlistId)
     const cacheKey = `playlist:${id}`
     const cached = this.cache.get<Playlist>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getPlaylist', src => src.getPlaylist!(id)),
@@ -374,11 +400,12 @@ export class MusicKit {
   }
 
   async getRadio(videoId: string): Promise<Song[]> {
-    await this.ensureClients()
     const id = resolveInput(videoId)
     const cacheKey = `radio:${id}`
     const cached = this.cache.get<Song[]>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getRadio', src => src.getRadio!(id)),
@@ -388,11 +415,12 @@ export class MusicKit {
   }
 
   async getRelated(videoId: string): Promise<Song[]> {
-    await this.ensureClients()
     const id = resolveInput(videoId)
     const cacheKey = `related:${id}`
     const cached = this.cache.get<Song[]>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getRelated', src => src.getRelated!(id)),
@@ -402,11 +430,12 @@ export class MusicKit {
   }
 
   async getSuggestions(id: string): Promise<Song[]> {
-    await this.ensureClients()
     const resolved = resolveInput(id)
     const cacheKey = `suggestions:${resolved}`
     const cached = this.cache.get<Song[]>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.getRelated(resolved)
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH)
@@ -414,11 +443,12 @@ export class MusicKit {
   }
 
   async getMetadata(id: string): Promise<Song> {
-    await this.ensureClients()
     const resolved = resolveInput(id)
     const cacheKey = `metadata:${resolved}`
     const cached = this.cache.get<Song>(cacheKey)
     if (cached) return cached
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+    await this.ensureClients()
 
     const result = await this.call('browse', () =>
       this.tryEachSource('getMetadata', src => src.getMetadata!(resolved)),
@@ -451,6 +481,7 @@ export class MusicKit {
   }
 
   async getCharts(options?: BrowseOptions): Promise<Section[]> {
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     return this.call('browse', () =>
       this.tryEachSource('getCharts', src => src.getCharts!(options)),
@@ -458,6 +489,7 @@ export class MusicKit {
   }
 
   async getMoodCategories(): Promise<{ title: string; params: string }[]> {
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     return this.call('browse', () =>
       this.tryEachSource('getMoodCategories', src => src.getMoodCategories!()),
@@ -465,6 +497,7 @@ export class MusicKit {
   }
 
   async getMoodPlaylists(params: string): Promise<Section[]> {
+    await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     return this.call('browse', () =>
       this.tryEachSource('getMoodPlaylists', src => src.getMoodPlaylists!(params)),
@@ -472,12 +505,14 @@ export class MusicKit {
   }
 
   async download(videoId: string, options?: DownloadOptions): Promise<void> {
+    await this.limiter.throttle('stream', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const id = resolveInput(videoId)
     return this._downloader!.download(id, options)
   }
 
   async streamAudio(id: string): Promise<NodeJS.ReadableStream> {
+    await this.limiter.throttle('stream', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const resolved = resolveInput(id)
     return this._downloader!.streamAudio(resolved)
@@ -513,6 +548,7 @@ export class MusicKit {
   }
 
   async streamPCM(id: string): Promise<NodeJS.ReadableStream> {
+    await this.limiter.throttle('stream', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const resolved = resolveInput(id)
     try {

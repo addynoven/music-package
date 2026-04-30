@@ -713,13 +713,15 @@ function parseExpiry(url) {
     return 0;
   }
 }
-function ytdlpResolve(videoId, quality, cookiesPath) {
+function ytdlpResolve(videoId, quality, cookiesPath, proxy) {
   return new Promise((resolve, reject) => {
     const formatSelector = quality === "low" ? "worstaudio" : "bestaudio";
     const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
+    const proxyArgs = proxy ? ["--proxy", proxy] : [];
     (0, import_node_child_process.execFile)("yt-dlp", [
       "--no-playlist",
       ...cookiesArgs,
+      ...proxyArgs,
       "--dump-json",
       "-f",
       formatSelector,
@@ -753,9 +755,10 @@ function ytdlpResolve(videoId, quality, cookiesPath) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, cookiesPath) {
+  constructor(cache, cookiesPath, proxy) {
     this.cache = cache;
     this.cookiesPath = cookiesPath;
+    this.proxy = proxy;
   }
   async resolve(videoId, quality = "high") {
     const raw = typeof quality === "string" ? quality : quality.quality ?? "high";
@@ -765,7 +768,7 @@ var StreamResolver = class {
     if (cached && !this.cache.isUrlExpired(cached.url)) {
       return cached;
     }
-    const data = await ytdlpResolve(videoId, q, this.cookiesPath);
+    const data = await ytdlpResolve(videoId, q, this.cookiesPath, this.proxy);
     this.cache.set(cacheKey, data, Cache.TTL.STREAM);
     return data;
   }
@@ -798,12 +801,14 @@ var INVALID_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
 function sanitize(name) {
   return name.replace(INVALID_CHARS, "").trim();
 }
-function ytdlpDownload(videoId, destFile, format, cookiesPath, filename, onProgress) {
+function ytdlpDownload(videoId, destFile, format, cookiesPath, proxy, filename, onProgress) {
   return new Promise((resolve, reject) => {
     const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
+    const proxyArgs = proxy ? ["--proxy", proxy] : [];
     const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
       ...cookiesArgs,
+      ...proxyArgs,
       "--js-runtimes",
       "node",
       "--remote-components",
@@ -837,16 +842,19 @@ function ytdlpDownload(videoId, destFile, format, cookiesPath, filename, onProgr
   });
 }
 var Downloader = class {
-  constructor(resolver, discovery, cookiesPath) {
+  constructor(resolver, discovery, cookiesPath, proxy) {
     this.resolver = resolver;
     this.discovery = discovery;
     this.cookiesPath = cookiesPath;
+    this.proxy = proxy;
   }
   streamAudio(videoId) {
     const cookiesArgs = this.cookiesPath ? ["--cookies", this.cookiesPath] : [];
+    const proxyArgs = this.proxy ? ["--proxy", this.proxy] : [];
     const proc = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
       ...cookiesArgs,
+      ...proxyArgs,
       "-f",
       "bestaudio",
       "-o",
@@ -882,9 +890,11 @@ var Downloader = class {
   }
   streamPCM(videoId) {
     const cookiesArgs = this.cookiesPath ? ["--cookies", this.cookiesPath] : [];
+    const proxyArgs = this.proxy ? ["--proxy", this.proxy] : [];
     const ytdlp = (0, import_node_child_process2.spawn)("yt-dlp", [
       "--no-playlist",
       ...cookiesArgs,
+      ...proxyArgs,
       "-f",
       "bestaudio",
       "-o",
@@ -934,7 +944,7 @@ var Downloader = class {
     }
     const { mkdir } = await import("fs/promises");
     await mkdir(options.path ?? ".", { recursive: true });
-    await ytdlpDownload(videoId, dest, format, this.cookiesPath, filename, options.onProgress);
+    await ytdlpDownload(videoId, dest, format, this.cookiesPath, this.proxy, filename, options.onProgress);
   }
   async fetchAndWrite(url, writeStream, filename, totalBytes, onProgress) {
     const response = await fetch(url, {
@@ -1013,7 +1023,8 @@ var Identifier = class {
       duration: String(Math.round(duration)),
       fingerprint
     });
-    const response = await fetch(`${ACOUSTID_ENDPOINT}?${params}`);
+    const fetchFn = this.options.fetch ?? globalThis.fetch;
+    const response = await fetchFn(`${ACOUSTID_ENDPOINT}?${params}`);
     if (!response.ok) throw new NetworkError(`AcoustID API error: ${response.status}`, response.status);
     const data = await response.json();
     if (data.status !== "ok" || !data.results?.length) return null;
@@ -1043,8 +1054,10 @@ var Identifier = class {
   }
   async recognizeWithSongrec(filePath) {
     if (!this.options.songrecBin) return null;
+    const duration = await this.getAudioDuration(filePath);
+    const startSec = Math.max(0, Math.min(60, duration - 15));
     const clipPath = `/tmp/songrec-clip-${Date.now()}.wav`;
-    await this.extractClip(filePath, clipPath);
+    await this.extractClip(filePath, clipPath, startSec);
     let output;
     try {
       output = await new Promise((resolve, reject) => {
@@ -1072,14 +1085,37 @@ var Identifier = class {
       return null;
     }
   }
-  extractClip(inputPath, outputPath) {
+  getAudioDuration(filePath) {
+    return new Promise((resolve) => {
+      const proc = (0, import_node_child_process3.spawn)("ffprobe", [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
+        filePath
+      ]);
+      let output = "";
+      proc.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      proc.stderr.resume();
+      proc.on("error", () => resolve(0));
+      proc.on("close", () => {
+        const d = parseFloat(output.trim());
+        resolve(isNaN(d) ? 0 : d);
+      });
+    });
+  }
+  extractClip(inputPath, outputPath, startSec = 0) {
     return new Promise((resolve, reject) => {
       const proc = (0, import_node_child_process3.spawn)("ffmpeg", [
         "-hide_banner",
         "-loglevel",
         "error",
         "-ss",
-        "60",
+        String(startSec),
         "-t",
         "10",
         "-i",
@@ -1233,6 +1269,36 @@ var YouTubeMusicSource = class {
   async getMetadata(id) {
     return this.discovery.getInfo(id);
   }
+  async getAlbum(id) {
+    return this.discovery.getAlbum(id);
+  }
+  async getArtist(id) {
+    return this.discovery.getArtist(id);
+  }
+  async getPlaylist(id) {
+    return this.discovery.getPlaylist(id);
+  }
+  async getRadio(id) {
+    return this.discovery.getRadio(id);
+  }
+  async getRelated(id) {
+    return this.discovery.getRelated(id);
+  }
+  async getHome() {
+    return this.discovery.getHome();
+  }
+  async getCharts(options) {
+    return this.discovery.getCharts(options);
+  }
+  async getMoodCategories() {
+    return this.discovery.getMoodCategories();
+  }
+  async getMoodPlaylists(params) {
+    return this.discovery.getMoodPlaylists(params);
+  }
+  async autocomplete(query) {
+    return this.discovery.autocomplete(query);
+  }
 };
 
 // src/sources/youtube-data-api.ts
@@ -1244,6 +1310,22 @@ function parseDuration2(iso) {
 }
 function mapThumbnails2(thumbs) {
   return Object.values(thumbs).map((t) => ({ url: t.url, width: t.width, height: t.height }));
+}
+var TOPIC_SUFFIX = / - Topic$/;
+var TITLE_NOISE = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster|m\/?v|visualizer)[^\)\]】]*[\)\]】]/gi;
+function extractArtistTitle(rawTitle, channelTitle) {
+  const cleanTitle = rawTitle.replace(TITLE_NOISE, "").trim();
+  if (TOPIC_SUFFIX.test(channelTitle)) {
+    return { artist: channelTitle.replace(TOPIC_SUFFIX, "").trim(), title: cleanTitle };
+  }
+  const dash = cleanTitle.indexOf(" - ");
+  if (dash !== -1) {
+    return {
+      artist: cleanTitle.slice(0, dash).trim(),
+      title: cleanTitle.slice(dash + 3).trim()
+    };
+  }
+  return { title: cleanTitle, artist: channelTitle.trim() };
 }
 async function ytFetch(url) {
   const res = await fetch(url);
@@ -1269,6 +1351,7 @@ var YouTubeDataAPISource = class {
     searchUrl.searchParams.set("part", "snippet");
     searchUrl.searchParams.set("q", query);
     searchUrl.searchParams.set("type", "video");
+    searchUrl.searchParams.set("videoCategoryId", "10");
     searchUrl.searchParams.set("maxResults", String(maxResults));
     searchUrl.searchParams.set("key", this.apiKey);
     const searchData = await ytFetch(searchUrl);
@@ -1286,11 +1369,12 @@ var YouTubeDataAPISource = class {
     const songs = videoIds.map((id) => {
       const detail = detailMap.get(id);
       if (!detail) return null;
+      const { title, artist } = extractArtistTitle(detail.snippet.title, detail.snippet.channelTitle);
       return {
         type: "song",
         videoId: id,
-        title: detail.snippet.title,
-        artist: detail.snippet.channelTitle,
+        title,
+        artist,
         duration: parseDuration2(detail.contentDetails?.duration ?? ""),
         thumbnails: mapThumbnails2(detail.snippet.thumbnails ?? {})
       };
@@ -1305,11 +1389,12 @@ var YouTubeDataAPISource = class {
     const data = await ytFetch(url);
     const item = data.items?.[0];
     if (!item) throw new NotFoundError(`Video not found: ${id}`, id);
+    const { title, artist } = extractArtistTitle(item.snippet.title, item.snippet.channelTitle);
     return {
       type: "song",
       videoId: id,
-      title: item.snippet.title,
-      artist: item.snippet.channelTitle,
+      title,
+      artist,
       duration: parseDuration2(item.contentDetails?.duration ?? ""),
       thumbnails: mapThumbnails2(item.snippet.thumbnails ?? {})
     };
@@ -1378,29 +1463,56 @@ function serializeLrc(lines) {
 }
 
 // src/lyrics/lrclib.ts
-async function fetchFromLrclib(artist, title) {
-  try {
-    const params = new URLSearchParams({ artist_name: artist, track_name: title });
-    const res = await fetch(`https://lrclib.net/api/get?${params}`, {
-      headers: { "User-Agent": "musicstream-sdk (https://github.com/addynoven/music-package)" }
+var UA = "musicstream-sdk (https://github.com/addynoven/music-package)";
+function toLyrics(data) {
+  if (!data.plainLyrics) return null;
+  return {
+    plain: data.plainLyrics.trim(),
+    synced: data.syncedLyrics ? parseLrc(data.syncedLyrics) : null
+  };
+}
+async function getStrict(artist, title, duration, fetchFn) {
+  const params = new URLSearchParams({ artist_name: artist, track_name: title });
+  if (duration && duration > 0) params.set("duration", String(Math.round(duration)));
+  const res = await fetchFn(`https://lrclib.net/api/get?${params}`, { headers: { "User-Agent": UA } });
+  if (!res.ok) return null;
+  return toLyrics(await res.json());
+}
+async function searchClosest(artist, title, duration, fetchFn) {
+  const params = new URLSearchParams({ artist_name: artist, track_name: title });
+  const res = await fetchFn(`https://lrclib.net/api/search?${params}`, { headers: { "User-Agent": UA } });
+  if (!res.ok) return null;
+  const candidates = await res.json();
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const synced = candidates.filter((c) => c.syncedLyrics);
+  const pool = synced.length ? synced : candidates;
+  let chosen;
+  if (duration && duration > 0) {
+    const sorted = [...pool].sort((a, b) => {
+      const da = Math.abs((a.duration ?? Infinity) - duration);
+      const db = Math.abs((b.duration ?? Infinity) - duration);
+      return da - db;
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.plainLyrics) return null;
-    return {
-      plain: data.plainLyrics.trim(),
-      synced: data.syncedLyrics ? parseLrc(data.syncedLyrics) : null
-    };
+    chosen = sorted[0];
+    if (Math.abs((chosen.duration ?? Infinity) - duration) > 5) return null;
+  } else {
+    chosen = pool[0];
+  }
+  return toLyrics(chosen);
+}
+async function fetchFromLrclib(artist, title, duration, fetchFn = globalThis.fetch) {
+  try {
+    return await getStrict(artist, title, duration, fetchFn) ?? await searchClosest(artist, title, duration, fetchFn);
   } catch {
     return null;
   }
 }
 
 // src/lyrics/lyrics-ovh.ts
-async function fetchFromLyricsOvh(artist, title) {
+async function fetchFromLyricsOvh(artist, title, fetchFn = globalThis.fetch) {
   try {
     const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-    const res = await fetch(url);
+    const res = await fetchFn(url);
     if (!res.ok) return null;
     const data = await res.json();
     const plain = data.lyrics?.trim();
@@ -1482,6 +1594,64 @@ function resolveYouTubeMusicUrl(input) {
   }
 }
 
+// src/utils/cookies.ts
+var import_node_fs2 = require("fs");
+function readCookieHeader(path) {
+  if (!(0, import_node_fs2.existsSync)(path)) return "";
+  try {
+    const lines = (0, import_node_fs2.readFileSync)(path, "utf8").split("\n");
+    const pairs = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const fields = line.split("	");
+      if (fields.length < 7) continue;
+      const name = fields[5];
+      const value = fields[6];
+      if (name) pairs.push(`${name}=${value}`);
+    }
+    return pairs.join("; ");
+  } catch {
+    return "";
+  }
+}
+
+// src/utils/fetch.ts
+function makeFetch({ proxy, session }) {
+  if (!proxy && !session) return globalThis.fetch;
+  return async (input, init) => {
+    let sessionHeaders = {};
+    if (session) {
+      sessionHeaders = await session.buildHeaders();
+    }
+    const callerHeaders = normalizeHeaders(init?.headers);
+    const merged = { ...sessionHeaders, ...callerHeaders };
+    const mergedInit = { ...init ?? {}, headers: merged };
+    if (proxy) {
+      const undici = await import("undici").catch(() => null);
+      if (undici) {
+        const dispatcher = new undici.ProxyAgent(proxy);
+        return undici.fetch(input, { ...mergedInit, dispatcher });
+      }
+    }
+    return globalThis.fetch(input, mergedInit);
+  };
+}
+function normalizeHeaders(headers) {
+  if (!headers) return {};
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  if (typeof headers.forEach === "function") {
+    const out = {};
+    headers.forEach((v, k) => {
+      out[k] = v;
+    });
+    return out;
+  }
+  return headers;
+}
+
 // src/logger/index.ts
 var LEVELS = {
   silent: 0,
@@ -1529,11 +1699,20 @@ var Logger = class {
 function makeReq(endpoint) {
   return { method: "GET", endpoint, headers: {}, body: null };
 }
+function isQuotaOrRateLimit(err) {
+  if (!(err instanceof Error)) return false;
+  const name = err.constructor?.name ?? "";
+  if (name === "NetworkError") {
+    const status = err.status;
+    return status === 403 || status === 429;
+  }
+  return false;
+}
 function resolveSourceOrder(pref) {
   if (!pref || pref === "best") return ["youtube"];
   return pref;
 }
-var MusicKit = class _MusicKit {
+var _MusicKit = class _MusicKit {
   constructor(config = {}, _yt) {
     this.searchCache = /* @__PURE__ */ new Map();
     this.sources = [];
@@ -1564,10 +1743,12 @@ var MusicKit = class _MusicKit {
       visitorId: config.visitorId,
       userAgent: config.userAgent
     });
+    this.sharedFetch = makeFetch({ proxy: config.proxy, session: this.session });
+    this.innerTubeFetch = config.proxy ? makeFetch({ proxy: config.proxy }) : void 0;
     if (_yt) {
       this._discovery = new DiscoveryClient(_yt);
-      this._stream = new StreamResolver(this.cache, config.cookiesPath);
-      this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath);
+      this._stream = new StreamResolver(this.cache, config.cookiesPath, config.proxy);
+      this._downloader = new Downloader(this._stream, this._discovery, config.cookiesPath, config.proxy);
     }
     if (!config.youtubeApiKey && !config.cookiesPath) {
       this.log.warn("[MusicKit] No youtubeApiKey or cookiesPath configured. You may hit YouTube rate limits under heavy usage. Recommendation: set youtubeApiKey for search, cookiesPath for streams.");
@@ -1576,21 +1757,46 @@ var MusicKit = class _MusicKit {
       this.log.warn("[MusicKit] identify() is unavailable \u2014 no acoustidApiKey set. Get a free key at acoustid.org and pass it as config.identify.acoustidApiKey.");
     }
   }
+  searchCacheSet(key, value) {
+    if (this.searchCache.size >= _MusicKit.SEARCH_CACHE_MAX) {
+      this.searchCache.delete(this.searchCache.keys().next().value);
+    }
+    this.searchCache.set(key, value);
+  }
+  searchCacheGet(key) {
+    const val = this.searchCache.get(key);
+    if (val !== void 0) {
+      this.searchCache.delete(key);
+      this.searchCache.set(key, val);
+    }
+    return val;
+  }
   static async create(config = {}) {
+    const instance = new _MusicKit(config);
+    const cookieHeader = config.cookiesPath ? readCookieHeader(config.cookiesPath) : "";
     const yt = await import_youtubei.Innertube.create({
       generate_session_locally: true,
+      ...instance.innerTubeFetch ? { fetch: instance.innerTubeFetch } : {},
+      ...cookieHeader ? { cookie: cookieHeader } : {},
       ...config.language ? { lang: config.language } : {},
       ...config.location ? { location: config.location } : {}
     });
-    return new _MusicKit(config, yt);
+    instance._discovery = new DiscoveryClient(yt);
+    instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy);
+    instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy);
+    return instance;
   }
   registerSource(source) {
     this.sources.push(source);
   }
   sourceFor(query, override) {
+    if (override === "youtube") {
+      const yt = this.sources.find((s) => s.name.startsWith("youtube"));
+      if (!yt) throw new ValidationError(`Source 'youtube' is not registered \u2014 check your sourceOrder config`, "sourceOrder");
+      return yt;
+    }
     if (override) {
-      const targetName = "youtube-music";
-      const found = this.sources.find((s) => s.name === targetName);
+      const found = this.sources.find((s) => s.name === override);
       if (!found) throw new ValidationError(`Source '${override}' is not registered \u2014 check your sourceOrder config`, "sourceOrder");
       return found;
     }
@@ -1598,26 +1804,53 @@ var MusicKit = class _MusicKit {
     if (!source) throw new NotFoundError(`No source can handle: ${query}`, query);
     return source;
   }
+  pickSearchSource(query, override, filter) {
+    if (override) return this.sourceFor(query, override);
+    if (filter && filter !== "songs") {
+      const ytMusic = this.sources.find((s) => s.name === "youtube-music");
+      if (ytMusic) return ytMusic;
+    }
+    return this.sourceFor(query);
+  }
+  async tryEachSource(method, call, isQuotaError = isQuotaOrRateLimit) {
+    let lastErr;
+    for (const src of this.sources) {
+      if (typeof src[method] !== "function") continue;
+      try {
+        return await call(src);
+      } catch (err) {
+        lastErr = err;
+        if (!isQuotaError(err)) throw err;
+      }
+    }
+    throw lastErr ?? new NotFoundError("No source could handle request", method);
+  }
   async ensureClients() {
     if (!this._discovery) {
       if (!this._ytPromise) {
+        const cookieHeader = this.config.cookiesPath ? readCookieHeader(this.config.cookiesPath) : "";
         this._ytPromise = import_youtubei.Innertube.create({
           generate_session_locally: true,
+          ...this.innerTubeFetch ? { fetch: this.innerTubeFetch } : {},
+          ...cookieHeader ? { cookie: cookieHeader } : {},
           ...this.config.language ? { lang: this.config.language } : {},
           ...this.config.location ? { location: this.config.location } : {}
         });
       }
       const yt = await this._ytPromise;
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath);
-      this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath);
+      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy);
+      this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy);
     }
     if (this.sources.length === 0) {
       for (const name of this.sourceOrder) {
         if (name === "youtube") {
-          this.sources.push(
-            this.config.youtubeApiKey ? new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream) : new YouTubeMusicSource(this._discovery, this._stream)
-          );
+          if (this.config.youtubeApiKey) {
+            this.sources.push(new YouTubeDataAPISource(this.config.youtubeApiKey, this._stream));
+            this.sources.push(new YouTubeMusicSource(this._discovery, this._stream));
+          } else {
+            this.sources.push(new YouTubeMusicSource(this._discovery, this._stream));
+          }
         }
       }
     }
@@ -1652,22 +1885,26 @@ var MusicKit = class _MusicKit {
     const cacheKey = `autocomplete:${resolved}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
+    await this.limiter.throttle("autocomplete", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
-    const result = await this.call("autocomplete", () => this._discovery.autocomplete(resolved));
+    const result = await this.call(
+      "autocomplete",
+      () => this.tryEachSource("autocomplete", (src) => src.autocomplete(resolved))
+    );
     this.cache.set(cacheKey, result, 60);
     return result;
   }
   async search(query, options) {
     const resolved = resolveInput(query);
     const cacheKey = `search:${resolved}:${options?.filter ?? "all"}:${options?.limit ?? "default"}:${options?.source ?? "auto"}`;
-    const inMemory = this.searchCache.get(cacheKey);
+    const inMemory = this.searchCacheGet(cacheKey);
     if (inMemory !== void 0) {
       this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
       return inMemory;
     }
     const persisted = this.cache.get(cacheKey);
     if (persisted) {
-      this.searchCache.set(cacheKey, persisted);
+      this.searchCacheSet(cacheKey, persisted);
       this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
       return persisted;
     }
@@ -1675,12 +1912,14 @@ var MusicKit = class _MusicKit {
     await this.limiter.throttle("search", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const { source: sourceOverride, ...searchOpts } = options ?? {};
-    const result = await this.call("search", () => this.sourceFor(resolved, sourceOverride).search(resolved, searchOpts));
-    this.searchCache.set(cacheKey, result);
+    const src = this.pickSearchSource(resolved, sourceOverride, searchOpts.filter);
+    const result = await this.call("search", () => src.search(resolved, searchOpts));
+    this.searchCacheSet(cacheKey, result);
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
   async getStream(videoId, options) {
+    await this.limiter.throttle("stream", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const id = resolveInput(videoId);
     const quality = options?.quality ?? "high";
@@ -1691,88 +1930,117 @@ var MusicKit = class _MusicKit {
     const id = resolveInput(videoId);
     const src = this.sourceFor(id);
     const [song, streamData] = await Promise.all([
-      this.call("browse", () => this._discovery.getInfo(id)),
+      this.call("browse", () => this.tryEachSource("getMetadata", (s) => s.getMetadata(id))),
       this.call("stream", () => src.getStream(id, "high"))
     ]);
     return { ...song, stream: streamData };
   }
   async getHome(options) {
-    await this.ensureClients();
     const lang = options?.language;
     const cacheKey = `home:${lang ?? "default"}:${options?.source ?? "auto"}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getHome());
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getHome", (src) => src.getHome())
+    );
     this.cache.set(cacheKey, result, Cache.TTL.HOME);
     return result;
   }
   async getArtist(channelId) {
-    await this.ensureClients();
     const id = resolveInput(channelId);
     const cacheKey = `artist:${id}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getArtist(id));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getArtist", (src) => src.getArtist(id))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
     return result;
   }
   async getAlbum(browseId) {
-    await this.ensureClients();
     const id = resolveInput(browseId);
     const cacheKey = `album:${id}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getAlbum(id));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getAlbum", (src) => src.getAlbum(id))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
     return result;
   }
   async getPlaylist(playlistId) {
-    await this.ensureClients();
     const id = resolveInput(playlistId);
     const cacheKey = `playlist:${id}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getPlaylist(id));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getPlaylist", (src) => src.getPlaylist(id))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.ARTIST);
     return result;
   }
   async getRadio(videoId) {
-    await this.ensureClients();
     const id = resolveInput(videoId);
     const cacheKey = `radio:${id}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getRadio(id));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getRadio", (src) => src.getRadio(id))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
   async getRelated(videoId) {
-    await this.ensureClients();
     const id = resolveInput(videoId);
     const cacheKey = `related:${id}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getRelated(id));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getRelated", (src) => src.getRelated(id))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
   async getSuggestions(id) {
-    await this.ensureClients();
     const resolved = resolveInput(id);
     const cacheKey = `suggestions:${resolved}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
     const result = await this.getRelated(resolved);
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
   async getMetadata(id) {
-    await this.ensureClients();
     const resolved = resolveInput(id);
     const cacheKey = `metadata:${resolved}`;
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const result = await this.call("browse", () => this._discovery.getInfo(resolved));
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    await this.ensureClients();
+    const result = await this.call(
+      "browse",
+      () => this.tryEachSource("getMetadata", (src) => src.getMetadata(resolved))
+    );
     this.cache.set(cacheKey, result, Cache.TTL.SEARCH);
     return result;
   }
@@ -1787,30 +2055,44 @@ var MusicKit = class _MusicKit {
       const meta = await this.getMetadata(resolved);
       const artist = sanitizeArtist(meta.artist);
       const title = sanitizeTitle(meta.title);
-      lyrics = await fetchFromLrclib(artist, title) ?? await fetchFromLyricsOvh(artist, title);
+      lyrics = await fetchFromLrclib(artist, title, meta.duration, this.sharedFetch) ?? await fetchFromLyricsOvh(artist, title, this.sharedFetch);
     } catch {
     }
     if (lyrics) this.cache.set(cacheKey, lyrics, Cache.TTL.LYRICS);
     return lyrics;
   }
   async getCharts(options) {
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
-    return this.call("browse", () => this._discovery.getCharts(options));
+    return this.call(
+      "browse",
+      () => this.tryEachSource("getCharts", (src) => src.getCharts(options))
+    );
   }
   async getMoodCategories() {
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
-    return this.call("browse", () => this._discovery.getMoodCategories());
+    return this.call(
+      "browse",
+      () => this.tryEachSource("getMoodCategories", (src) => src.getMoodCategories())
+    );
   }
   async getMoodPlaylists(params) {
+    await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
-    return this.call("browse", () => this._discovery.getMoodPlaylists(params));
+    return this.call(
+      "browse",
+      () => this.tryEachSource("getMoodPlaylists", (src) => src.getMoodPlaylists(params))
+    );
   }
   async download(videoId, options) {
+    await this.limiter.throttle("stream", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const id = resolveInput(videoId);
     return this._downloader.download(id, options);
   }
   async streamAudio(id) {
+    await this.limiter.throttle("stream", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const resolved = resolveInput(id);
     return this._downloader.streamAudio(resolved);
@@ -1825,7 +2107,8 @@ var MusicKit = class _MusicKit {
     if (!this._identifier) {
       this._identifier = new Identifier({
         acoustidApiKey: this.config.identify.acoustidApiKey,
-        songrecBin: this.config.identify.songrecBin
+        songrecBin: this.config.identify.songrecBin,
+        fetch: this.sharedFetch
       });
     }
     let match = await this._identifier.recognizeWithSongrec(filePath);
@@ -1839,6 +2122,7 @@ var MusicKit = class _MusicKit {
     return songs[0] ?? null;
   }
   async streamPCM(id) {
+    await this.limiter.throttle("stream", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const resolved = resolveInput(id);
     try {
@@ -1853,12 +2137,14 @@ var MusicKit = class _MusicKit {
     return this._podcast.getFeed(feedUrl);
   }
 };
-var TITLE_NOISE = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi;
+_MusicKit.SEARCH_CACHE_MAX = 256;
+var MusicKit = _MusicKit;
+var TITLE_NOISE2 = /\s*[\(\[【][^\)\]】]*(official|video|audio|lyrics?|explicit|instrumental|hq|hd|4k|live|cover|remix|remaster)[^\)\]】]*[\)\]】]/gi;
 var ARTIST_NOISE = /\s*([-–—].*|VEVO|Official|Music|Records?|Productions?)$/i;
 function sanitizeTitle(t) {
   const dash = t.indexOf(" - ");
   const cleaned = dash !== -1 ? t.slice(dash + 3) : t;
-  return cleaned.replace(TITLE_NOISE, "").trim();
+  return cleaned.replace(TITLE_NOISE2, "").trim();
 }
 function sanitizeArtist(a) {
   return a.replace(ARTIST_NOISE, "").trim();
@@ -1940,7 +2226,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "3.0.0";
+var version = "4.0.0";
 
 // src/models/index.ts
 var SearchFilter = {

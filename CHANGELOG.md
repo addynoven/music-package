@@ -5,6 +5,52 @@ Follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [4.0.0] — 2026-04-30
+
+Major hardening pass. Many config fields that were previously declared but not wired now actually take effect. Source routing, anti-ban headers, lyrics matching, and rate limiting all properly honor user configuration.
+
+**No breaking API changes.** No-env behavior is preserved — the SDK still works without `youtubeApiKey`/`cookiesPath`/`proxy`.
+
+### Fixed — config that didn't do anything now does
+
+- **`cookiesPath`** is now also passed to InnerTube (`youtubei.js`), not just to yt-dlp. Search/getMetadata/getHome and every other browse operation now use the logged-in session, dramatically reducing rate-limit / IP-ban exposure.
+- **`proxy`** is now wired through every outbound code path: InnerTube, LRCLIB, lyrics.ovh, AcoustID (via `undici.ProxyAgent`), and yt-dlp (via `--proxy`).
+- **`userAgent`** and **`visitorId`** now actually flow into outbound external API calls via the previously-unused `SessionManager` (`X-Goog-Visitor-Id`, `User-Agent`).
+- **`rateLimit.browse`**, **`rateLimit.stream`**, **`rateLimit.autocomplete`** now throttle their respective endpoints. Previously only `rateLimit.search` worked.
+
+### Fixed — silent regressions when `youtubeApiKey` was set
+
+- `mk.search(q, { filter: 'albums' | 'artists' | 'playlists' })` no longer returns `[]` when an API key is set. The SDK now co-registers both `YouTubeDataAPISource` and `YouTubeMusicSource`, with Data API handling `songs` and YouTube Music handling everything else.
+- When the YouTube Data API quota is exhausted (HTTP 403/429), search now falls back automatically to YouTube Music. Previously the SDK would throw until the quota reset.
+- `mk.getMetadata`, `getHome`, `getArtist`, `getAlbum`, `getPlaylist`, `getRadio`, `getRelated`, `getCharts`, `getMoodCategories`, `getMoodPlaylists`, `autocomplete` now all route through the configured source list (with quota fallback). Previously they always hit InnerTube directly, regardless of `youtubeApiKey`.
+- `mk.search(q, { source: 'youtube' })` no longer throws `ValidationError` when the API key is set. The override now picks any registered source whose name starts with `youtube`.
+
+### Fixed — search & lyrics quality
+
+- `YouTubeDataAPISource.search()` now passes `videoCategoryId=10` so YouTube filters to its Music category before returning results. No more random teasers / vlogs / reactions in song search results.
+- `YouTubeDataAPISource` now extracts a clean `artist` and `title` from results, recognizing YT Music's `"<Artist> - Topic"` channels and `"Artist - Title (Official Video)"` patterns.
+- `fetchFromLrclib(artist, title, duration?, fetchFn?)` now passes `duration` to LRCLIB for ±2s server-side matching, and falls back to `/api/search` with closest-duration pick (±5s reject). No more confidently-wrong synced lyrics from a different recording.
+
+### Removed — dead code
+
+- `'visitorIdRefreshed'` event — was declared in the public types but never emitted. Removed.
+- Unused optional methods (`getFeaturedPlaylists`, `getLyrics`) on the `AudioSource` interface — no source ever implemented them. Removed.
+
+### Internal
+
+- New `src/utils/cookies.ts` — Netscape `cookies.txt` → cookie header serializer.
+- New `src/utils/fetch.ts` — `makeFetch({ proxy, session })` with `undici.ProxyAgent` proxy support and SessionManager header injection.
+- New `tryEachSource()` and `pickSearchSource()` helpers in `MusicKit` — uniform multi-source routing with quota fallback.
+- `searchCache` capped at 256 entries with insertion-order LRU. Previously unbounded — relevant for long-running consumers.
+- New playgrounds: `verify-api-usage.ts` (header capture), `test-source-routing.ts` (T2/T3/T4 live checks), `test-throttle.ts` (T7 timing), `test-lyrics-sync.ts` (LRCLIB duration matching).
+- `audit/AUDIT.md` and `audit/TODO.md` document the full audit and the staged fix plan.
+
+### Migration
+
+None required for typical usage. If you set `youtubeApiKey` previously and were silently getting empty results for albums/artists/playlists, those calls will now return real data — verify your downstream code handles non-empty responses for those filters.
+
+---
+
 ## [1.0.0] — 2026-04-25
 
 First stable release. API is considered stable — breaking changes will follow semver from here.

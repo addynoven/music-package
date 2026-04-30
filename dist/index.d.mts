@@ -17,7 +17,6 @@ type EventMap = {
     cacheHit: [key: string, ttlRemaining: number];
     cacheMiss: [key: string];
     rateLimited: [endpoint: string, waitMs: number];
-    visitorIdRefreshed: [oldId: string, newId: string];
     retry: [endpoint: string, attempt: number, reason: string];
     error: [error: Error];
 };
@@ -204,7 +203,7 @@ interface MusicKitError extends Error {
     endpoint?: string;
     statusCode?: number;
 }
-type MusicKitEvent = 'beforeRequest' | 'afterRequest' | 'cacheHit' | 'cacheMiss' | 'rateLimited' | 'visitorIdRefreshed' | 'retry' | 'error';
+type MusicKitEvent = 'beforeRequest' | 'afterRequest' | 'cacheHit' | 'cacheMiss' | 'rateLimited' | 'retry' | 'error';
 interface PodcastEpisode {
     type: 'episode';
     guid: string;
@@ -244,9 +243,15 @@ interface AudioSource {
     getArtist?(id: string): Promise<Artist>;
     getPlaylist?(id: string): Promise<Playlist>;
     getRadio?(id: string): Promise<Song[]>;
-    getHome?(language?: string): Promise<Section[]>;
-    getFeaturedPlaylists?(language?: string): Promise<Playlist[]>;
-    getLyrics?(id: string): Promise<string | null>;
+    getRelated?(id: string): Promise<Song[]>;
+    getHome?(): Promise<Section[]>;
+    getCharts?(options?: BrowseOptions): Promise<Section[]>;
+    getMoodCategories?(): Promise<{
+        title: string;
+        params: string;
+    }[]>;
+    getMoodPlaylists?(params: string): Promise<Section[]>;
+    autocomplete?(query: string): Promise<string[]>;
 }
 
 type EventName = Parameters<MusicKitEmitter['on']>[0];
@@ -259,8 +264,13 @@ declare class MusicKit {
     private readonly session;
     private readonly emitter;
     private readonly log;
+    private readonly sharedFetch;
+    private readonly innerTubeFetch;
     private readonly searchCache;
     private readonly sourceOrder;
+    private static readonly SEARCH_CACHE_MAX;
+    private searchCacheSet;
+    private searchCacheGet;
     readonly sources: AudioSource[];
     private _discovery;
     private _stream;
@@ -272,6 +282,8 @@ declare class MusicKit {
     static create(config?: MusicKitConfig): Promise<MusicKit>;
     registerSource(source: AudioSource): void;
     private sourceFor;
+    private pickSearchSource;
+    private tryEachSource;
     private ensureClients;
     private call;
     on(event: EventName, handler: EventHandler<typeof event>): void;
@@ -468,7 +480,8 @@ declare class DiscoveryClient {
 declare class StreamResolver {
     private readonly cache;
     private readonly cookiesPath?;
-    constructor(cache: Cache, cookiesPath?: string | undefined);
+    private readonly proxy?;
+    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined);
     resolve(videoId: string, quality?: Quality | {
         codec?: string;
         quality?: Quality;
@@ -487,7 +500,8 @@ declare class Downloader {
     private readonly resolver;
     private readonly discovery;
     private readonly cookiesPath?;
-    constructor(resolver: StreamResolver, discovery: DiscoveryClient, cookiesPath?: string | undefined);
+    private readonly proxy?;
+    constructor(resolver: StreamResolver, discovery: DiscoveryClient, cookiesPath?: string | undefined, proxy?: string | undefined);
     streamAudio(videoId: string): NodeJS.ReadableStream;
     streamPCMFromUrl(url: string): NodeJS.ReadableStream;
     streamPCM(videoId: string): NodeJS.ReadableStream;
@@ -526,6 +540,7 @@ interface IdentifyResult {
 interface IdentifierOptions {
     acoustidApiKey: string;
     songrecBin?: string;
+    fetch?: typeof globalThis.fetch;
 }
 declare class Identifier {
     private readonly options;
@@ -536,6 +551,7 @@ declare class Identifier {
         duration: number;
     }>;
     recognizeWithSongrec(filePath: string): Promise<IdentifyResult | null>;
+    private getAudioDuration;
     private extractClip;
 }
 
@@ -554,7 +570,7 @@ declare class Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-var version = "3.0.0";
+var version = "4.0.0";
 
 /**
  * Returns the thumbnail whose width is closest to targetSize.

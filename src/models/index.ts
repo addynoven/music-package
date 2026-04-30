@@ -209,7 +209,6 @@ export type MusicKitEvent =
   | 'cacheHit'
   | 'cacheMiss'
   | 'rateLimited'
-  | 'visitorIdRefreshed'
   | 'retry'
   | 'error'
 

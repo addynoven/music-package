@@ -4,7 +4,6 @@ type EventMap = {
   cacheHit: [key: string, ttlRemaining: number]
   cacheMiss: [key: string]
   rateLimited: [endpoint: string, waitMs: number]
-  visitorIdRefreshed: [oldId: string, newId: string]
   retry: [endpoint: string, attempt: number, reason: string]
   error: [error: Error]
 }

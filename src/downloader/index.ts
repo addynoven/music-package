@@ -45,24 +45,46 @@ function ytdlpDownload(
       '-f', format === 'm4a' ? 'bestaudio[ext=m4a]/bestaudio' : 'bestaudio[ext=webm]/bestaudio',
       '-x', '--audio-format', format,
       '--embed-metadata',
+      // Force line-terminated progress (default uses \r overwriting which
+      // breaks line-by-line parsing) and ensure progress is emitted at all.
+      '--newline',
+      '--progress',
       '-o', destFile,
       `https://music.youtube.com/watch?v=${videoId}`,
     ])
     let err = ''
-    proc.stderr.on('data', (d: Buffer) => {
-      const text = d.toString()
-      err += text
+    let leftover = ''
+    const onChunk = (d: Buffer): void => {
+      const text = leftover + d.toString()
+      const lines = text.split('\n')
+      // Last fragment may be partial — buffer it for the next chunk.
+      leftover = lines.pop() ?? ''
       if (onProgress && filename) {
-        for (const line of text.split('\n')) {
+        for (const line of lines) {
           const parsed = parseYtdlpProgress(line)
           if (parsed) onProgress({ ...parsed, filename })
         }
       }
+    }
+    // yt-dlp routes progress to stdout by default (stderr only carries errors
+    // and warnings). Listen on both so we capture progress regardless of which
+    // stream the running yt-dlp version uses.
+    proc.stdout.on('data', onChunk)
+    proc.stderr.on('data', (d: Buffer) => {
+      err += d.toString()
+      onChunk(d)
     })
     proc.on('error', (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)))
     proc.on('close', (code) => {
       if (code !== 0) reject(new Error(`yt-dlp download failed: ${err.slice(0, 200)}`))
-      else resolve()
+      else {
+        // Emit a final 100% tick if we never got one (e.g. file too small for
+        // yt-dlp to print intermediate progress), so UI bars don't stall at <100%.
+        if (onProgress && filename) {
+          onProgress({ percent: 100, bytesDownloaded: 0, totalBytes: undefined, filename })
+        }
+        resolve()
+      }
     })
   })
 }

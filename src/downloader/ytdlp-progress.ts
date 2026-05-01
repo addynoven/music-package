@@ -1,9 +1,11 @@
-const PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(MiB|KiB|GiB)/
+const PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB)/
 
 const UNIT_BYTES: Record<string, number> = {
+  B: 1,
   KiB: 1024,
   MiB: 1024 * 1024,
   GiB: 1024 * 1024 * 1024,
+  TiB: 1024 * 1024 * 1024 * 1024,
 }
 
 export interface YtdlpProgressResult {

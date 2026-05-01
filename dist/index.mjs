@@ -772,12 +772,14 @@ function ytdlpResolve(videoId, quality, cookiesPath, proxy) {
   });
 }
 var StreamResolver = class {
-  constructor(cache, cookiesPath, proxy, pool, onFallback) {
+  constructor(cache, cookiesPath, proxy, pool, onFallback, onCacheHit, onCacheMiss) {
     this.cache = cache;
     this.cookiesPath = cookiesPath;
     this.proxy = proxy;
     this.pool = pool;
     this.onFallback = onFallback;
+    this.onCacheHit = onCacheHit;
+    this.onCacheMiss = onCacheMiss;
   }
   /**
    * Resolves a stream URL.
@@ -797,8 +799,10 @@ var StreamResolver = class {
     const cacheKey = `stream:${videoId}:${q}`;
     const cached = this.cache.get(cacheKey);
     if (cached && !this.cache.isUrlExpired(cached.url)) {
+      this.onCacheHit?.(cacheKey, Cache.TTL.STREAM);
       return cached;
     }
+    this.onCacheMiss?.(cacheKey);
     let data;
     if (this.pool) {
       const clientErrors = [];
@@ -902,11 +906,13 @@ import { spawn } from "child_process";
 import { pipeline } from "stream/promises";
 
 // src/downloader/ytdlp-progress.ts
-var PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(MiB|KiB|GiB)/;
+var PROGRESS_RE = /\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(B|KiB|MiB|GiB|TiB)/;
 var UNIT_BYTES = {
+  B: 1,
   KiB: 1024,
   MiB: 1024 * 1024,
-  GiB: 1024 * 1024 * 1024
+  GiB: 1024 * 1024 * 1024,
+  TiB: 1024 * 1024 * 1024 * 1024
 };
 function parseYtdlpProgress(line) {
   const m = line.match(PROGRESS_RE);
@@ -940,25 +946,41 @@ function ytdlpDownload(videoId, destFile, format, cookiesPath, proxy, filename, 
       "--audio-format",
       format,
       "--embed-metadata",
+      // Force line-terminated progress (default uses \r overwriting which
+      // breaks line-by-line parsing) and ensure progress is emitted at all.
+      "--newline",
+      "--progress",
       "-o",
       destFile,
       `https://music.youtube.com/watch?v=${videoId}`
     ]);
     let err = "";
-    proc.stderr.on("data", (d) => {
-      const text = d.toString();
-      err += text;
+    let leftover = "";
+    const onChunk = (d) => {
+      const text = leftover + d.toString();
+      const lines = text.split("\n");
+      leftover = lines.pop() ?? "";
       if (onProgress && filename) {
-        for (const line of text.split("\n")) {
+        for (const line of lines) {
           const parsed = parseYtdlpProgress(line);
           if (parsed) onProgress({ ...parsed, filename });
         }
       }
+    };
+    proc.stdout.on("data", onChunk);
+    proc.stderr.on("data", (d) => {
+      err += d.toString();
+      onChunk(d);
     });
     proc.on("error", (spawnErr) => reject(new Error(`yt-dlp not found or failed to start: ${spawnErr.message}`)));
     proc.on("close", (code) => {
       if (code !== 0) reject(new Error(`yt-dlp download failed: ${err.slice(0, 200)}`));
-      else resolve();
+      else {
+        if (onProgress && filename) {
+          onProgress({ percent: 100, bytesDownloaded: 0, totalBytes: void 0, filename });
+        }
+        resolve();
+      }
     });
   });
 }
@@ -2440,7 +2462,15 @@ var _MusicKit = class _MusicKit {
       const pool = await this._poolPromise;
       const yt = await pool.get("YTMUSIC");
       this._discovery = new DiscoveryClient(yt);
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, pool, this.onStreamFallback);
+      this._stream = new StreamResolver(
+        this.cache,
+        this.config.cookiesPath,
+        this.config.proxy,
+        pool,
+        this.onStreamFallback,
+        (key, ttl) => this.emitter.emit("cacheHit", key, ttl),
+        (key) => this.emitter.emit("cacheMiss", key)
+      );
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy);
       this._lyrics = this.buildLyricsRegistry(yt, this.config.lyrics?.providers);
     }
@@ -2486,7 +2516,11 @@ var _MusicKit = class _MusicKit {
     const resolved = resolveInput(query);
     const cacheKey = `autocomplete:${resolved}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, 60);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("autocomplete", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2541,7 +2575,11 @@ var _MusicKit = class _MusicKit {
     const lang = options?.language;
     const cacheKey = `home:${lang ?? "default"}:${options?.source ?? "auto"}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.HOME);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2555,7 +2593,11 @@ var _MusicKit = class _MusicKit {
     const id = resolveInput(channelId);
     const cacheKey = `artist:${id}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.ARTIST);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2569,7 +2611,11 @@ var _MusicKit = class _MusicKit {
     const id = resolveInput(browseId);
     const cacheKey = `album:${id}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.ARTIST);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2583,7 +2629,11 @@ var _MusicKit = class _MusicKit {
     const id = resolveInput(playlistId);
     const cacheKey = `playlist:${id}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.ARTIST);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2597,7 +2647,11 @@ var _MusicKit = class _MusicKit {
     const id = resolveInput(videoId);
     const cacheKey = `radio:${id}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2611,7 +2665,11 @@ var _MusicKit = class _MusicKit {
     const id = resolveInput(videoId);
     const cacheKey = `related:${id}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2625,7 +2683,11 @@ var _MusicKit = class _MusicKit {
     const resolved = resolveInput(id);
     const cacheKey = `suggestions:${resolved}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.getRelated(resolved);
@@ -2636,7 +2698,11 @@ var _MusicKit = class _MusicKit {
     const resolved = resolveInput(id);
     const cacheKey = `metadata:${resolved}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.SEARCH);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
     await this.limiter.throttle("browse", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
     await this.ensureClients();
     const result = await this.call(
@@ -2665,7 +2731,11 @@ var _MusicKit = class _MusicKit {
     const cacheKey = `lyrics:${resolved}`;
     if (!options?.providers) {
       const cached = this.cache.get(cacheKey);
-      if (cached !== null) return cached;
+      if (cached !== null) {
+        this.emitter.emit("cacheHit", cacheKey, Cache.TTL.LYRICS);
+        return cached;
+      }
+      this.emitter.emit("cacheMiss", cacheKey);
     }
     const chain = options?.providers ? this.specToProviders(options.providers) : this._lyrics?.list() ?? [];
     let result = null;

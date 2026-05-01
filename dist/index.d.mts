@@ -683,7 +683,9 @@ declare class StreamResolver {
     private readonly proxy?;
     private readonly pool?;
     private readonly onFallback?;
-    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined, pool?: InnertubePool | undefined, onFallback?: ((videoId: string, reason: string) => void) | undefined);
+    private readonly onCacheHit?;
+    private readonly onCacheMiss?;
+    constructor(cache: Cache, cookiesPath?: string | undefined, proxy?: string | undefined, pool?: InnertubePool | undefined, onFallback?: ((videoId: string, reason: string) => void) | undefined, onCacheHit?: ((key: string, ttlSeconds: number) => void) | undefined, onCacheMiss?: ((key: string) => void) | undefined);
     /**
      * Resolves a stream URL.
      *

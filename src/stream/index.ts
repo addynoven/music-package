@@ -66,6 +66,8 @@ export class StreamResolver {
     private readonly proxy?: string,
     private readonly pool?: InnertubePool,
     private readonly onFallback?: (videoId: string, reason: string) => void,
+    private readonly onCacheHit?: (key: string, ttlSeconds: number) => void,
+    private readonly onCacheMiss?: (key: string) => void,
   ) {}
 
   /**
@@ -87,8 +89,10 @@ export class StreamResolver {
 
     const cached = this.cache.get<StreamingData>(cacheKey)
     if (cached && !this.cache.isUrlExpired(cached.url)) {
+      this.onCacheHit?.(cacheKey, Cache.TTL.STREAM)
       return cached
     }
+    this.onCacheMiss?.(cacheKey)
 
     let data: StreamingData | undefined
 

@@ -281,7 +281,15 @@ export class MusicKit {
       const pool = await this._poolPromise
       const yt = await pool.get('YTMUSIC')
       this._discovery = new DiscoveryClient(yt)
-      this._stream = new StreamResolver(this.cache, this.config.cookiesPath, this.config.proxy, pool, this.onStreamFallback)
+      this._stream = new StreamResolver(
+        this.cache,
+        this.config.cookiesPath,
+        this.config.proxy,
+        pool,
+        this.onStreamFallback,
+        (key, ttl) => this.emitter.emit('cacheHit', key, ttl),
+        (key) => this.emitter.emit('cacheMiss', key),
+      )
       this._downloader = new Downloader(this._stream, this._discovery, this.config.cookiesPath, this.config.proxy)
       this._lyrics = this.buildLyricsRegistry(yt, this.config.lyrics?.providers)
     }
@@ -338,7 +346,11 @@ export class MusicKit {
     const resolved = resolveInput(query)
     const cacheKey = `autocomplete:${resolved}`
     const cached = this.cache.get<string[]>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, 60)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('autocomplete', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
     const result = await this.call('autocomplete', () =>
@@ -406,7 +418,11 @@ export class MusicKit {
     const lang = options?.language
     const cacheKey = `home:${lang ?? 'default'}:${options?.source ?? 'auto'}`
     const cached = this.cache.get<Section[]>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.HOME)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -422,7 +438,11 @@ export class MusicKit {
     const id = resolveInput(channelId)
     const cacheKey = `artist:${id}`
     const cached = this.cache.get<Artist>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.ARTIST)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -437,7 +457,11 @@ export class MusicKit {
     const id = resolveInput(browseId)
     const cacheKey = `album:${id}`
     const cached = this.cache.get<Album>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.ARTIST)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -452,7 +476,11 @@ export class MusicKit {
     const id = resolveInput(playlistId)
     const cacheKey = `playlist:${id}`
     const cached = this.cache.get<Playlist>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.ARTIST)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -467,7 +495,11 @@ export class MusicKit {
     const id = resolveInput(videoId)
     const cacheKey = `radio:${id}`
     const cached = this.cache.get<Song[]>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -482,7 +514,11 @@ export class MusicKit {
     const id = resolveInput(videoId)
     const cacheKey = `related:${id}`
     const cached = this.cache.get<Song[]>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -497,7 +533,11 @@ export class MusicKit {
     const resolved = resolveInput(id)
     const cacheKey = `suggestions:${resolved}`
     const cached = this.cache.get<Song[]>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -510,7 +550,11 @@ export class MusicKit {
     const resolved = resolveInput(id)
     const cacheKey = `metadata:${resolved}`
     const cached = this.cache.get<Song>(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.SEARCH)
+      return cached
+    }
+    this.emitter.emit('cacheMiss', cacheKey)
     await this.limiter.throttle('browse', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
     await this.ensureClients()
 
@@ -542,7 +586,11 @@ export class MusicKit {
     // Cache only applies to the default chain — per-call overrides bypass cache.
     if (!options?.providers) {
       const cached = this.cache.get<Lyrics>(cacheKey)
-      if (cached !== null) return cached
+      if (cached !== null) {
+        this.emitter.emit('cacheHit', cacheKey, Cache.TTL.LYRICS)
+        return cached
+      }
+      this.emitter.emit('cacheMiss', cacheKey)
     }
 
     // Resolve the provider chain BEFORE the try/catch so ValidationErrors

@@ -11,8 +11,8 @@ function makeClients(...names: StreamClient[]): readonly StreamClient[] {
 // ─── STREAM_CLIENT_FALLBACK_ORDER ─────────────────────────────────────────────
 
 describe('STREAM_CLIENT_FALLBACK_ORDER', () => {
-  it('starts with YTMUSIC', () => {
-    expect(STREAM_CLIENT_FALLBACK_ORDER[0]).toBe('YTMUSIC')
+  it('starts with ANDROID_VR', () => {
+    expect(STREAM_CLIENT_FALLBACK_ORDER[0]).toBe('ANDROID_VR')
   })
 
   it('contains exactly three clients', () => {

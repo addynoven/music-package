@@ -1,9 +1,9 @@
 export type StreamClient = 'YTMUSIC' | 'ANDROID_VR' | 'TVHTML5' | 'WEB_REMIX'
 
 export const STREAM_CLIENT_FALLBACK_ORDER: readonly StreamClient[] = [
-  'YTMUSIC',
   'ANDROID_VR',
   'TVHTML5',
+  'YTMUSIC',
 ] as const
 
 export interface TryClientsResult<T> {

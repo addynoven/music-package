@@ -188,6 +188,10 @@ export class MusicKit {
     instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, pool, instance.onStreamFallback)
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy)
     instance._lyrics = instance.buildLyricsRegistry(yt, config.lyrics?.providers)
+    // Pre-warm fallback clients in the background so stream resolution is fast
+    // on first play (ANDROID_VR is the most reliable client; TVHTML5 is next).
+    pool.get('ANDROID_VR').catch(() => {})
+    pool.get('TVHTML5').catch(() => {})
     return instance
   }
 

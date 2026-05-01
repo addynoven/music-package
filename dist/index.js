@@ -792,9 +792,9 @@ async function resolveViaInnertube(yt, videoId, options) {
 
 // src/stream/multi-client.ts
 var STREAM_CLIENT_FALLBACK_ORDER = [
-  "YTMUSIC",
   "ANDROID_VR",
-  "TVHTML5"
+  "TVHTML5",
+  "YTMUSIC"
 ];
 async function tryClients(clients, fn, options) {
   const errors = [];
@@ -2453,6 +2453,10 @@ var _MusicKit = class _MusicKit {
     instance._stream = new StreamResolver(instance.cache, config.cookiesPath, config.proxy, pool, instance.onStreamFallback);
     instance._downloader = new Downloader(instance._stream, instance._discovery, config.cookiesPath, config.proxy);
     instance._lyrics = instance.buildLyricsRegistry(yt, config.lyrics?.providers);
+    pool.get("ANDROID_VR").catch(() => {
+    });
+    pool.get("TVHTML5").catch(() => {
+    });
     return instance;
   }
   registerSource(source) {

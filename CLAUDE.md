@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`musicstream-sdk` (v3.0.0) — a Node.js SDK published on npm that provides search, streaming, browse, lyrics, download, podcast/RSS, audio identification, and a playback queue. **YouTube Music only** as of v3.0 (JioSaavn was removed in commit `9d33f96`). Targets single-user apps (CLI tools, Discord bots, desktop players). Requires Node ≥ 22.
+`musicstream-sdk` (v4.2.1) — a Node.js SDK published on npm that provides search, streaming, browse, lyrics, download, podcast/RSS, audio identification, and a playback queue. **YouTube Music only** as of v3.0 (JioSaavn was removed in commit `9d33f96`). Targets single-user apps (CLI tools, Discord bots, desktop players). Requires Node ≥ 22.
 
 External runtime deps the user must install separately: `yt-dlp` on PATH for stream/download. SongRec is optional for Shazam-based identification.
 
@@ -63,7 +63,7 @@ Sources        YouTubeMusicSource    (InnerTube via youtubei.js — default)
 `StreamResolver.resolve(videoId, quality)` walks this chain — first success wins:
 
 1. **SQLite cache** — `~6h` TTL keyed by `stream:<videoId>:<quality>`, skipped when the cached URL has expired.
-2. **InnerTube multi-client fast-path** — `tryClients(STREAM_CLIENT_FALLBACK_ORDER, ...)` walks `'YTMUSIC' → 'ANDROID_VR' → 'TVHTML5'`. For each client, fetches the corresponding `Innertube` from `InnertubePool`, calls `resolveViaInnertube(yt, videoId, { quality, client })` which uses `info.chooseFormat({ format: 'opus' })` (with `'mp4a'` fallback) + `format.decipher(yt.session.player)`. Reads `videoDetails.musicVideoType` and sets `isPrivateTrack` for `MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK`. Returns the first client's success.
+2. **InnerTube multi-client fast-path** — `tryClients(STREAM_CLIENT_FALLBACK_ORDER, ...)` walks `'ANDROID_VR' → 'TVHTML5' → 'YTMUSIC'` (ANDROID_VR first because most content streams without a PoToken there). For each client, fetches the corresponding `Innertube` from `InnertubePool`, calls `resolveViaInnertube(yt, videoId, { quality, client })` which uses `info.chooseFormat({ format: 'opus' })` (with `'mp4a'` fallback) + `format.decipher(yt.session.player)`. Reads `videoDetails.musicVideoType` and sets `isPrivateTrack` for `MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK`. Returns the first client's success.
 3. **yt-dlp fallback** — universal last resort when every InnerTube client fails. Slower (~2-3s shell-out vs ~1.5-2s for InnerTube) but covers cipher/geo/age-gate failures.
 
 `InnertubePool` (`src/stream/innertube-pool.ts`) lazy-creates one `Innertube` per `StreamClient`, caches the create promise so concurrent `get()`s share one round-trip, and accepts shared options (cookie, lang, location, fetch, poToken, getPoToken).

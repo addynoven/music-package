@@ -62,24 +62,20 @@ describe('AnalysisSchema — tempo.bpm numeric edge cases', () => {
     expect(result.success).toBe(false)
   })
 
-  // SCHEMA GAP: z.number() has no .positive() constraint.
-  // A rhythm-game cannot function with a negative or zero BPM.
-  // TODO: TempoSchema.bpm → z.number().positive()
-  it('currently accepts negative bpm (schema gap — no .positive() constraint)', () => {
+  it('rejects negative bpm (must be positive — rhythm-game cannot function with negative BPM)', () => {
     const result = AnalysisSchema.safeParse({
       ...base,
       tempo: { ...base.tempo, bpm: -1 },
     })
-    expect(result.success).toBe(true) // gap: should be false; fix with .positive()
+    expect(result.success).toBe(false)
   })
 
-  // SCHEMA GAP: zero BPM means no beats — unusable for beat-sync.
-  it('currently accepts zero bpm (schema gap — no .positive() constraint)', () => {
+  it('rejects zero bpm (must be positive — zero BPM means no beats, unusable for beat-sync)', () => {
     const result = AnalysisSchema.safeParse({
       ...base,
       tempo: { ...base.tempo, bpm: 0 },
     })
-    expect(result.success).toBe(true) // gap: should be false; fix with .positive()
+    expect(result.success).toBe(false)
   })
 
   it('accepts a very high but physically plausible bpm like 300', () => {
@@ -98,16 +94,14 @@ describe('AnalysisSchema — tempo.bpm numeric edge cases', () => {
 //   TODO: AnalysisSchema.duration → z.number().positive()
 
 describe('AnalysisSchema — duration numeric edge cases', () => {
-  // SCHEMA GAP: a zero-duration track has nothing to analyse
-  it('currently accepts zero duration (schema gap — no .positive() constraint)', () => {
+  it('rejects zero duration (must be positive — zero-duration track has nothing to analyse)', () => {
     const result = AnalysisSchema.safeParse({ ...base, duration: 0 })
-    expect(result.success).toBe(true) // gap: should be false; fix with .positive()
+    expect(result.success).toBe(false)
   })
 
-  // SCHEMA GAP: negative duration is physically impossible
-  it('currently accepts negative duration (schema gap — no .positive() constraint)', () => {
+  it('rejects negative duration (must be positive — negative duration is physically impossible)', () => {
     const result = AnalysisSchema.safeParse({ ...base, duration: -5 })
-    expect(result.success).toBe(true) // gap: should be false; fix with .positive()
+    expect(result.success).toBe(false)
   })
 })
 
@@ -122,15 +116,12 @@ describe('AnalysisSchema — tempo.beatGrid element edge cases', () => {
     expect(result.success).toBe(false)
   })
 
-  // SCHEMA GAP: beatGrid has no .nonnegative() constraint on elements.
-  // A beat at t < 0 is before the track starts — meaningless for timing.
-  // TODO: beatGrid → z.array(z.number().nonnegative())
-  it('currently accepts beatGrid with a negative timestamp (schema gap — no .nonnegative() on elements)', () => {
+  it('rejects beatGrid with a negative timestamp (beat at t < 0 is before track start — meaningless for timing)', () => {
     const result = AnalysisSchema.safeParse({
       ...base,
       tempo: { ...base.tempo, beatGrid: [-0.5, 0.21, 1.69] },
     })
-    expect(result.success).toBe(true) // gap: should be false; fix with .nonnegative()
+    expect(result.success).toBe(false)
   })
 
   it('accepts an empty beatGrid (silent track legitimately has no beats)', () => {
@@ -262,10 +253,9 @@ describe('AnalysisSchema — analyzedAt edge cases', () => {
     expect(result.success).toBe(true)
   })
 
-  // SCHEMA GAP: empty string passes because z.string() has no .min(1) guard.
-  it('currently accepts empty string analyzedAt (schema gap — z.string() allows empty strings)', () => {
+  it('rejects empty string analyzedAt (must be non-empty — z.string().min(1) enforced)', () => {
     const result = AnalysisSchema.safeParse({ ...base, analyzedAt: '' })
-    expect(result.success).toBe(true) // gap: should be false; fix with .min(1) or .datetime()
+    expect(result.success).toBe(false)
   })
 })
 

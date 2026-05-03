@@ -13,9 +13,9 @@ export const CamelotSchema = z.enum(CAMELOT_VALUES)
 // ─── Sub-schemas ──────────────────────────────────────────────────────────────
 
 export const TempoSchema = z.object({
-  bpm: z.number(),
+  bpm: z.number().positive(),
   confidence: z.number().min(0).max(1),
-  beatGrid: z.array(z.number()),
+  beatGrid: z.array(z.number().nonnegative()),
 })
 
 export const OnsetsSchema = z.array(z.number())
@@ -48,13 +48,13 @@ export const AnalysisSectionSchema = z.object({
 
 export const AnalysisSchema = z.object({
   videoId: z.string().min(1),
-  duration: z.number(),
+  duration: z.number().positive(),
   tempo: TempoSchema,
   onsets: OnsetsSchema,
   key: KeySchema.nullable(),
   energy: EnergySchema.nullable(),
   sections: z.array(AnalysisSectionSchema).nullable(),
-  analyzedAt: z.string(),
+  analyzedAt: z.string().min(1),
 })
 
 // ─── safeParseAnalysis ────────────────────────────────────────────────────────

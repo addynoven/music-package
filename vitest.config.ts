@@ -20,6 +20,7 @@ export default defineConfig({
         'src/session/fetcher.ts',
         'src/sources/audio-source.ts',  // pure interface — nothing to test
         'src/sources/index.ts',         // barrel re-export only
+        'src/analysis/types.ts',        // pure TypeScript types — no runtime coverage
       ],
       thresholds: {
         branches: 75,

@@ -15,6 +15,7 @@ export class Cache {
     ARTIST: 3_600,
     VISITOR_ID: 2_592_000,
     LYRICS: 315_360_000, // 10 years — lyrics never change
+    ANALYSIS: 31_536_000, // 1 year — analysis is deterministic per videoId
   } as const
 
   private db: DatabaseSync | null = null

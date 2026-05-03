@@ -4,6 +4,7 @@
  */
 
 import type { Song, Album, Artist, Thumbnail, StreamingData, AudioTrack, Section, Playlist } from '../../src/models'
+import type { Analysis } from '../../src/analysis/types'
 
 export function makeThumbnail(overrides: Partial<Thumbnail> = {}): Thumbnail {
   return {
@@ -98,6 +99,20 @@ export function makePlaylist(overrides: Partial<Playlist> = {}): Playlist {
     title: 'Best of the 80s',
     thumbnails: [makeThumbnail()],
     songCount: 42,
+    ...overrides,
+  }
+}
+
+export function makeAnalysis(overrides: Partial<Analysis> = {}): Analysis {
+  return {
+    videoId: 'dQw4w9WgXcQ',
+    duration: 213,
+    tempo: { bpm: 114, confidence: 0.85, beatGrid: [0.5, 1.0, 1.5, 2.0] },
+    onsets: [0.2, 0.5, 0.8, 1.1, 1.4],
+    key: { tonic: 'G', mode: 'major', camelot: '9B', confidence: 0.91 },
+    energy: { overall: 0.72, envelope: [{ t: 0, rms: 0.72 }, { t: 0.5, rms: 0.74 }] },
+    sections: null,
+    analyzedAt: '2026-05-03T00:00:00.000Z',
     ...overrides,
   }
 }

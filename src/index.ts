@@ -50,9 +50,14 @@ export {
   safeParsePlaylist,
 } from './schemas'
 
+// Analysis
+export { EssentiaAnalysisProvider } from './analysis/essentia-provider'
+export type { EssentiaInstance } from './analysis/essentia-provider'
+
 // Type exports
 export type { IdentifyResult } from './identifier'
 export type { LyricsProvider, LyricsProviderName } from './lyrics/provider'
+export type { Analysis, AnalysisProvider, Tempo, Key, Energy, Onsets, AnalysisSection, EnergyPoint, Camelot } from './analysis/types'
 
 export type {
   // Data models

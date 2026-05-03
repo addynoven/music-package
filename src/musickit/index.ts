@@ -23,8 +23,12 @@ import type { LyricsProvider, LyricsProviderName } from '../lyrics/provider'
 import { resolveInput } from '../utils/url-resolver'
 import { readCookieHeader } from '../utils/cookies'
 import { makeFetch } from '../utils/fetch'
-import { ValidationError, NotFoundError } from '../errors'
+import { ValidationError, NotFoundError, StreamError } from '../errors'
 import { Logger } from '../logger'
+import { InflightMap } from '../utils/inflight-map'
+import { EssentiaAnalysisProvider } from '../analysis/essentia-provider'
+import type { AnalysisProvider } from '../analysis/types'
+import type { Analysis } from '../analysis/types'
 import type { AudioSource } from '../sources/audio-source'
 import type {
   MusicKitConfig,
@@ -113,6 +117,8 @@ export class MusicKit {
   private _podcast: PodcastClient | null = null
   private _poolPromise: Promise<InnertubePool> | null = null
   private _lyrics: LyricsRegistry | null = null
+  private readonly _analysisProvider: AnalysisProvider
+  private readonly _analysisInflight = new InflightMap<string, Analysis>()
 
   constructor(config: MusicKitConfig = {}, _yt?: unknown) {
     this.config = config
@@ -170,6 +176,8 @@ export class MusicKit {
     if (!config.identify?.acoustidApiKey) {
       this.log.warn('[MusicKit] identify() is unavailable — no acoustidApiKey set. Get a free key at acoustid.org and pass it as config.identify.acoustidApiKey.')
     }
+
+    this._analysisProvider = config.analysis?.provider ?? new EssentiaAnalysisProvider(undefined, config.cookiesPath)
   }
 
   static async create(config: MusicKitConfig = {}): Promise<MusicKit> {
@@ -801,6 +809,47 @@ export class MusicKit {
     } catch {
       return this._downloader!.streamPCM(resolved)
     }
+  }
+
+  /**
+   * Returns a full audio analysis for the given YouTube `videoId`.
+   *
+   * The analysis includes tempo/BPM, beat grid, onset timestamps, key
+   * detection, and energy envelope. Results are cached for 1 year (analysis
+   * is deterministic per video). Parallel calls with the same videoId share
+   * a single in-flight provider invocation.
+   *
+   *   const analysis = await mk.getAnalysis('dQw4w9WgXcQ')
+   *   console.log(analysis.tempo.bpm)  // 114
+   */
+  async getAnalysis(videoId: string): Promise<Analysis> {
+    const id = resolveInput(videoId)
+    const cacheKey = `analysis:${id}`
+
+    const cached = this.cache.get<Analysis>(cacheKey)
+    if (cached) {
+      this.emitter.emit('cacheHit', cacheKey, Cache.TTL.ANALYSIS)
+      return cached
+    }
+
+    this.emitter.emit('cacheMiss', cacheKey)
+    await this.limiter.throttle('analysis', (ep, waitMs) => this.emitter.emit('rateLimited', ep, waitMs))
+
+    return this._analysisInflight.get(id, async () => {
+      try {
+        const result = await this.call('analysis', () =>
+          this._analysisProvider.analyze(id, new Uint8Array(0)),
+        )
+        this.cache.set(cacheKey, result, Cache.TTL.ANALYSIS)
+        return result
+      } catch (err) {
+        throw new StreamError(
+          `Analysis failed for videoId=${id}: ${err instanceof Error ? err.message : String(err)}`,
+          id,
+          err,
+        )
+      }
+    })
   }
 
   async getPodcast(feedUrl: string): Promise<Podcast> {

@@ -225,6 +225,17 @@ export interface MusicKitConfig {
    * Lyrics provider chain configuration. See `LyricsConfig`.
    */
   lyrics?: LyricsConfig
+  /**
+   * Audio analysis configuration.
+   * Defaults to `EssentiaAnalysisProvider` when not provided.
+   */
+  analysis?: {
+    /**
+     * Custom `AnalysisProvider` implementation. When omitted the default
+     * `EssentiaAnalysisProvider` is used.
+     */
+    provider?: import('../analysis/types').AnalysisProvider
+  }
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

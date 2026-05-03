@@ -3455,7 +3455,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "4.3.0";
+var version = "4.3.1";
 
 // src/models/index.ts
 var SearchFilter = {

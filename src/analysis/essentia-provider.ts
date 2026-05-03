@@ -152,14 +152,26 @@ export class EssentiaAnalysisProvider implements AnalysisProvider {
     this._injected = essentiaInstance ?? null
   }
 
-  private getEssentia(): EssentiaInstance {
+  private async getEssentia(): Promise<EssentiaInstance> {
     if (this._injected) return this._injected
     if (this._essentia) return this._essentia
 
-    // Lazy-load essentia.js so it's not required unless analyze() is actually called.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { EssentiaWASM, Essentia } = require('essentia.js')
-    this._essentia = new Essentia(EssentiaWASM) as EssentiaInstance
+    // Lazy-load essentia.js. Dynamic import works in both CJS and ESM, unlike
+    // require() which the ESM dist can't resolve at runtime.
+    const mod = (await import('essentia.js' as string)) as unknown as {
+      EssentiaWASM?: unknown
+      Essentia?: new (wasm: unknown, isDebug?: boolean) => EssentiaInstance
+      default?: {
+        EssentiaWASM?: unknown
+        Essentia?: new (wasm: unknown, isDebug?: boolean) => EssentiaInstance
+      }
+    }
+    const EssentiaWASM = mod.EssentiaWASM ?? mod.default?.EssentiaWASM
+    const Essentia = mod.Essentia ?? mod.default?.Essentia
+    if (!Essentia || !EssentiaWASM) {
+      throw new Error('essentia.js loaded but EssentiaWASM/Essentia exports are missing')
+    }
+    this._essentia = new Essentia(EssentiaWASM)
     return this._essentia
   }
 
@@ -175,7 +187,7 @@ export class EssentiaAnalysisProvider implements AnalysisProvider {
    * used by the integration layer and integration tests.
    */
   async analyze(videoId: string, audio: Uint8Array): Promise<Analysis> {
-    const essentia = this.getEssentia()
+    const essentia = await this.getEssentia()
 
     let float32: Float32Array
     let durationSec: number

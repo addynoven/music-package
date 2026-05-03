@@ -31,6 +31,80 @@ declare class MusicKitEmitter {
     emit<E extends EventName$1>(event: E, ...args: EventMap[E]): void;
 }
 
+type CamelotNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+type Camelot = `${CamelotNumber}A` | `${CamelotNumber}B`;
+interface Tempo {
+    /** The dominant tempo in beats per minute. */
+    bpm: number;
+    /** Certainty of BPM detection, in the range [0, 1]. */
+    confidence: number;
+    /** Beat timestamps in seconds — one entry per detected beat. */
+    beatGrid: number[];
+}
+/** Percussive onset timestamps in seconds. */
+type Onsets = number[];
+interface Key {
+    /** Root pitch class using sharps only ('C' | 'C#' | … | 'B'). */
+    tonic: 'C' | 'C#' | 'D' | 'D#' | 'E' | 'F' | 'F#' | 'G' | 'G#' | 'A' | 'A#' | 'B';
+    /** Scale mode. */
+    mode: 'major' | 'minor';
+    /** Camelot Wheel notation, e.g. '8A'. */
+    camelot: Camelot;
+    /** Certainty of key detection, in the range [0, 1]. */
+    confidence: number;
+}
+interface EnergyPoint {
+    /** Timestamp in seconds. */
+    t: number;
+    /** Normalised RMS amplitude at this timestamp. */
+    rms: number;
+}
+interface Energy {
+    /** Mean RMS amplitude for the whole track, normalised to [0, 1]. */
+    overall: number;
+    /** RMS over time, downsampled to ~2 Hz. Absent when not computed. */
+    envelope?: EnergyPoint[];
+}
+interface AnalysisSection {
+    /** Section start in seconds. */
+    start: number;
+    /** Section end in seconds. */
+    end: number;
+    /** Human-readable segment label, e.g. 'intro', 'verse', 'chorus'. */
+    label: string;
+    /** Normalised loudness for this section. */
+    loudness: number;
+}
+interface Analysis {
+    /** YouTube video ID this analysis is for. */
+    videoId: string;
+    /** Track duration in seconds. */
+    duration: number;
+    /** Tempo / beat-grid data (required — the rhythm-game cannot function without it). */
+    tempo: Tempo;
+    /** Percussive onset timestamps in seconds (required). */
+    onsets: Onsets;
+    /** Key detection result. Null when not computed or computation failed. */
+    key: Key | null;
+    /** Energy envelope. Null when not computed or computation failed. */
+    energy: Energy | null;
+    /** Structural sections. Null when not computed or computation failed. */
+    sections: AnalysisSection[] | null;
+    /** ISO 8601 timestamp of when this analysis was produced. */
+    analyzedAt: string;
+}
+interface AnalysisProvider {
+    /** Unique name identifying this provider. */
+    name: string;
+    /**
+     * Analyse the given audio buffer and return an `Analysis`.
+     *
+     * @param videoId  YouTube video ID (used for cache keying and logging).
+     * @param audio    Raw audio as a PCM / encoded byte buffer.
+     */
+    analyze(videoId: string, audio: Uint8Array): Promise<Analysis>;
+}
+
 interface Thumbnail {
     url: string;
     width: number;
@@ -223,6 +297,17 @@ interface MusicKitConfig {
      * Lyrics provider chain configuration. See `LyricsConfig`.
      */
     lyrics?: LyricsConfig;
+    /**
+     * Audio analysis configuration.
+     * Defaults to `EssentiaAnalysisProvider` when not provided.
+     */
+    analysis?: {
+        /**
+         * Custom `AnalysisProvider` implementation. When omitted the default
+         * `EssentiaAnalysisProvider` is used.
+         */
+        provider?: AnalysisProvider;
+    };
 }
 interface MusicKitRequest {
     method: string;
@@ -364,6 +449,8 @@ declare class MusicKit {
     private _podcast;
     private _poolPromise;
     private _lyrics;
+    private readonly _analysisProvider;
+    private readonly _analysisInflight;
     constructor(config?: MusicKitConfig, _yt?: unknown);
     static create(config?: MusicKitConfig): Promise<MusicKit>;
     registerSource(source: AudioSource): void;
@@ -474,6 +561,18 @@ declare class MusicKit {
     streamAudio(id: string): Promise<NodeJS.ReadableStream>;
     identify(filePath: string): Promise<Song | null>;
     streamPCM(id: string): Promise<NodeJS.ReadableStream>;
+    /**
+     * Returns a full audio analysis for the given YouTube `videoId`.
+     *
+     * The analysis includes tempo/BPM, beat grid, onset timestamps, key
+     * detection, and energy envelope. Results are cached for 1 year (analysis
+     * is deterministic per video). Parallel calls with the same videoId share
+     * a single in-flight provider invocation.
+     *
+     *   const analysis = await mk.getAnalysis('dQw4w9WgXcQ')
+     *   console.log(analysis.tempo.bpm)  // 114
+     */
+    getAnalysis(videoId: string): Promise<Analysis>;
     getPodcast(feedUrl: string): Promise<Podcast>;
 }
 
@@ -489,6 +588,7 @@ declare class Cache {
         readonly ARTIST: 3600;
         readonly VISITOR_ID: 2592000;
         readonly LYRICS: 315360000;
+        readonly ANALYSIS: 31536000;
     };
     private db;
     private readonly enabled;
@@ -786,7 +886,7 @@ declare class Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-var version = "4.2.1";
+var version = "4.3.0";
 
 /**
  * Returns the thumbnail whose width is closest to targetSize.
@@ -955,4 +1055,68 @@ declare function safeParseAlbum(data: unknown): Album | null;
 declare function safeParseArtist(data: unknown): Artist | null;
 declare function safeParsePlaylist(data: unknown): Playlist | null;
 
-export { type Album, AlbumSchema, type Artist, ArtistSchema, type AudioTrack, BETTER_LYRICS_BASE, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, HttpError, Identifier, type IdentifyResult, KUGOU_LYRICS_BASE, KUGOU_SEARCH_BASE, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, LyricsRegistry, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RegistryPosition, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, YouTubeNativeLyricsProvider, YouTubeSubtitleLyricsProvider, betterLyricsProvider, fetchFromBetterLyrics, fetchFromKuGou, fetchFromLrclib, fetchFromLyricsOvh, fetchFromSimpMusic, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, kugouProvider, lrclibProvider, lyricsOvhProvider, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, simpMusicProvider, version };
+/**
+ * EssentiaAnalysisProvider — audio analysis via essentia.js WASM.
+ *
+ * Gotchas baked in from the Wave-1 spike (essentia-spike-report.md):
+ *
+ * 1. TS defs for RhythmExtractor2013 are WRONG. Runtime keys are
+ *    `ticks` / `estimates` / `bpmIntervals`, NOT `beats_position` /
+ *    `bpm_estimates` / `bpm_intervals`. We read the raw output as `any`.
+ *
+ * 2. Half-tempo correction: if BPM > 120 AND BPM/2 ∈ [50, 95], divide by 2.
+ *    This fixes We Will Rock You (~163 BPM raw → ~81 BPM correct).
+ *
+ * 3. KeyExtractor returns flats (`Ab`). Spec mandates sharps. We normalise
+ *    all 5 flat tonic values at the boundary before any Camelot lookup.
+ *
+ * 4. KeyExtractor actual runtime key for the scale is `scale`, NOT `mode`.
+ *
+ * 5. OnsetRate is hard-wired to 44 100 Hz internally. The audio passed in
+ *    MUST be at 44 100 Hz — callers (the integration layer) are responsible
+ *    for decoding at that rate. If the provided `sampleRate` differs we throw
+ *    rather than silently produce wrong timestamps.
+ *
+ * 6. Every WASM `VectorFloat` MUST be `.delete()`'d in a `try/finally` or
+ *    the WASM heap leaks on long-running servers.
+ */
+
+interface EssentiaInstance {
+    arrayToVector(arr: Float32Array): any;
+    vectorToArray(vec: any): Float32Array;
+    RhythmExtractor2013(...args: unknown[]): any;
+    OnsetRate(signal: unknown): any;
+    KeyExtractor(...args: unknown[]): any;
+    RMS(signal: unknown): any;
+}
+declare class EssentiaAnalysisProvider implements AnalysisProvider {
+    private readonly cookiesPath?;
+    readonly name = "essentia";
+    private _essentia;
+    private readonly _injected;
+    /**
+     * @param essentiaInstance Optional pre-initialised essentia instance for DI
+     *   (used in unit tests so we never touch real WASM there).
+     * @param cookiesPath Optional path to a Netscape cookies file passed to yt-dlp.
+     */
+    constructor(essentiaInstance?: EssentiaInstance, cookiesPath?: string | undefined);
+    private getEssentia;
+    /**
+     * Analyse the given audio buffer and return an `Analysis`.
+     *
+     * The `audio` parameter must be mono Float32 PCM at 44 100 Hz encoded as f32le.
+     * If you pass raw bytes from yt-dlp/ffmpeg, this is already the case when
+     * ffmpeg is invoked with `-ac 1 -ar 44100 -f f32le`.
+     *
+     * When `audio` is empty (length 0) the method falls back to fetching audio
+     * directly via yt-dlp + ffmpeg using `videoId` — this is the primary path
+     * used by the integration layer and integration tests.
+     */
+    analyze(videoId: string, audio: Uint8Array): Promise<Analysis>;
+    private _extractTempo;
+    private _extractOnsets;
+    private _extractKey;
+    private _extractEnergy;
+}
+
+export { type Album, AlbumSchema, type Analysis, type AnalysisProvider, type AnalysisSection, type Artist, ArtistSchema, type AudioTrack, BETTER_LYRICS_BASE, type BrowseOptions, Cache, type CacheConfig, type CacheTTLConfig, type Camelot, DiscoveryClient, type DownloadFormat$1 as DownloadFormat, type DownloadOptions$1 as DownloadOptions, type DownloadProgress, Downloader, type Energy, type EnergyPoint, EssentiaAnalysisProvider, type EssentiaInstance, HttpError, Identifier, type IdentifyResult, KUGOU_LYRICS_BASE, KUGOU_SEARCH_BASE, type Key, type LogLevel, Logger, type LyricLine, type LyricWord, type Lyrics, type LyricsProvider, type LyricsProviderName, LyricsRegistry, type MediaItem, MusicKit, MusicKitBaseError, type MusicKitConfig, MusicKitEmitter, type MusicKitError, MusicKitErrorCode, type MusicKitEvent, type MusicKitRequest, NetworkError, NonRetryableError, NotFoundError, type Onsets, type Playlist, PlaylistSchema, type Podcast, PodcastClient, type PodcastEpisode, type Quality, Queue, type RateLimitConfig, RateLimitError, RateLimiter, type RegistryPosition, type RepeatMode, RetryEngine, SearchFilter, type SearchOptions, type SearchResults, type Section, SessionManager, type Song, SongSchema, type SourceName, type SourcePreference, StreamError, type StreamOptions, type StreamQuality, StreamResolver, type StreamingData, type Tempo, type Thumbnail, ThumbnailSchema, ValidationError, type WordTime, YouTubeNativeLyricsProvider, YouTubeSubtitleLyricsProvider, betterLyricsProvider, fetchFromBetterLyrics, fetchFromKuGou, fetchFromLrclib, fetchFromLyricsOvh, fetchFromSimpMusic, formatTimestamp, getActiveLine, getActiveLineIndex, getBestThumbnail, isStreamExpired, kugouProvider, lrclibProvider, lyricsOvhProvider, offsetLrc, parseLrc, resolveInput, resolveSpotifyUrl, safeParseAlbum, safeParseArtist, safeParsePlaylist, safeParseSong, serializeLrc, simpMusicProvider, version };

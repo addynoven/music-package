@@ -1,6 +1,6 @@
 {
   "name": "musicstream-sdk",
-  "version": "4.2.3",
+  "version": "4.3.0",
   "description": "Music SDK for Node.js — search, stream, lyrics, podcasts, download. Powered by YouTube Music. No API keys required.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

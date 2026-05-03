@@ -77,8 +77,10 @@ Cache.TTL = {
   HOME: 28800,
   ARTIST: 3600,
   VISITOR_ID: 2592e3,
-  LYRICS: 31536e4
+  LYRICS: 31536e4,
   // 10 years — lyrics never change
+  ANALYSIS: 31536e3
+  // 1 year — analysis is deterministic per videoId
 };
 
 // src/rate-limiter/index.ts
@@ -419,6 +421,19 @@ function mapPlaylistItem(item) {
     thumbnails: mapThumbnails(item)
   };
 }
+function mapHomeItem(item) {
+  switch (item?.item_type) {
+    case "album":
+      return mapAlbumItem(item);
+    case "artist":
+      return mapArtistItem(item);
+    case "playlist":
+      return mapPlaylistItem(item);
+    case "song":
+    default:
+      return mapSongItem(item);
+  }
+}
 function flatContents(res) {
   return (res?.contents ?? []).flatMap((section) => section?.contents ?? []);
 }
@@ -496,7 +511,7 @@ var DiscoveryClient = class {
     const res = await this.yt.music.getHomeFeed();
     return (res?.sections ?? res?.contents ?? []).map((s) => ({
       title: extractText(s.title) || extractText(s.header?.title) || "",
-      items: (s.contents ?? []).map(mapSongItem)
+      items: (s.contents ?? []).map(mapHomeItem)
     })).filter((s) => !isEmptySection(s.title, s.items));
   }
   async getArtist(channelId) {
@@ -2258,6 +2273,419 @@ var Logger = class {
   }
 };
 
+// src/utils/inflight-map.ts
+var InflightMap = class {
+  constructor() {
+    this.inflight = /* @__PURE__ */ new Map();
+  }
+  get(key, factory) {
+    const existing = this.inflight.get(key);
+    if (existing) return existing;
+    const promise = factory().finally(() => this.inflight.delete(key));
+    this.inflight.set(key, promise);
+    return promise;
+  }
+  size() {
+    return this.inflight.size;
+  }
+  has(key) {
+    return this.inflight.has(key);
+  }
+};
+
+// src/analysis/essentia-provider.ts
+import { spawn as spawn3 } from "child_process";
+import { pipeline as pipeline2 } from "stream/promises";
+
+// src/analysis/camelot.ts
+var CAMELOT_MAJOR = {
+  "C": "8B",
+  "G": "9B",
+  "D": "10B",
+  "A": "11B",
+  "E": "12B",
+  "B": "1B",
+  "F#": "2B",
+  "C#": "3B",
+  "G#": "4B",
+  "D#": "5B",
+  "A#": "6B",
+  "F": "7B"
+};
+var CAMELOT_MINOR = {
+  "A": "8A",
+  "E": "9A",
+  "B": "10A",
+  "F#": "11A",
+  "C#": "12A",
+  "G#": "1A",
+  "D#": "2A",
+  "A#": "3A",
+  "F": "4A",
+  "C": "5A",
+  "G": "6A",
+  "D": "7A"
+};
+function keyToCamelot(tonic, mode) {
+  return mode === "major" ? CAMELOT_MAJOR[tonic] : CAMELOT_MINOR[tonic];
+}
+
+// src/analysis/schema.ts
+import { z as z2 } from "zod";
+var CAMELOT_VALUES = [
+  "1A",
+  "2A",
+  "3A",
+  "4A",
+  "5A",
+  "6A",
+  "7A",
+  "8A",
+  "9A",
+  "10A",
+  "11A",
+  "12A",
+  "1B",
+  "2B",
+  "3B",
+  "4B",
+  "5B",
+  "6B",
+  "7B",
+  "8B",
+  "9B",
+  "10B",
+  "11B",
+  "12B"
+];
+var CamelotSchema = z2.enum(CAMELOT_VALUES);
+var TempoSchema = z2.object({
+  bpm: z2.number().positive(),
+  confidence: z2.number().min(0).max(1),
+  beatGrid: z2.array(z2.number().nonnegative())
+});
+var OnsetsSchema = z2.array(z2.number());
+var KeySchema = z2.object({
+  tonic: z2.enum(["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]),
+  mode: z2.enum(["major", "minor"]),
+  camelot: CamelotSchema,
+  confidence: z2.number().min(0).max(1)
+});
+var EnergyPointSchema = z2.object({
+  t: z2.number(),
+  rms: z2.number()
+});
+var EnergySchema = z2.object({
+  overall: z2.number(),
+  envelope: z2.array(EnergyPointSchema).optional()
+});
+var AnalysisSectionSchema = z2.object({
+  start: z2.number(),
+  end: z2.number(),
+  label: z2.string(),
+  loudness: z2.number()
+});
+var AnalysisSchema = z2.object({
+  videoId: z2.string().min(1),
+  duration: z2.number().positive(),
+  tempo: TempoSchema,
+  onsets: OnsetsSchema,
+  key: KeySchema.nullable(),
+  energy: EnergySchema.nullable(),
+  sections: z2.array(AnalysisSectionSchema).nullable(),
+  analyzedAt: z2.string().min(1)
+});
+function safeParseAnalysis(input) {
+  const result = AnalysisSchema.safeParse(input);
+  return result.success ? result.data : null;
+}
+
+// src/analysis/essentia-provider.ts
+var FLAT_TO_SHARP = {
+  Ab: "G#",
+  Bb: "A#",
+  Db: "C#",
+  Eb: "D#",
+  Gb: "F#"
+};
+function normalizeFlatToSharp(key) {
+  return FLAT_TO_SHARP[key] ?? key;
+}
+var SHARP_TONICS = /* @__PURE__ */ new Set([
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B"
+]);
+var SAMPLE_RATE = 44100;
+async function fetchPCM(videoId, cookiesPath) {
+  const cookiesArgs = cookiesPath ? ["--cookies", cookiesPath] : [];
+  const ytdlp = spawn3("yt-dlp", [
+    "--no-playlist",
+    ...cookiesArgs,
+    "-f",
+    "bestaudio",
+    "-o",
+    "-",
+    "--quiet",
+    `https://music.youtube.com/watch?v=${videoId}`
+  ]);
+  const ffmpeg = spawn3("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    "pipe:0",
+    "-ac",
+    "1",
+    // mono — essentia expects mono input
+    "-ar",
+    String(SAMPLE_RATE),
+    // 44 100 Hz — required by OnsetRate
+    "-f",
+    "f32le",
+    // float32 little-endian — maps directly to Float32Array
+    "pipe:1"
+  ]);
+  ytdlp.stderr.resume();
+  ffmpeg.stderr.resume();
+  pipeline2(ytdlp.stdout, ffmpeg.stdin).catch(() => {
+  });
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    ffmpeg.stdout.on("data", (chunk) => chunks.push(chunk));
+    ffmpeg.stdout.on("end", () => {
+      const buf = Buffer.concat(chunks);
+      const nSamples = buf.byteLength / 4;
+      const float32 = new Float32Array(nSamples);
+      const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+      for (let i = 0; i < nSamples; i++) {
+        float32[i] = dv.getFloat32(
+          i * 4,
+          /* littleEndian= */
+          true
+        );
+      }
+      resolve({ float32, durationSec: nSamples / SAMPLE_RATE });
+    });
+    ffmpeg.on("error", (e) => reject(new Error(`ffmpeg spawn error: ${e.message}`)));
+    ytdlp.on("error", (e) => reject(new Error(`yt-dlp spawn error: ${e.message}`)));
+    ffmpeg.on("close", (code) => {
+      if (code !== 0) reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+    ytdlp.on("close", () => {
+      ffmpeg.stdin.end();
+    });
+  });
+}
+var EssentiaAnalysisProvider = class {
+  /**
+   * @param essentiaInstance Optional pre-initialised essentia instance for DI
+   *   (used in unit tests so we never touch real WASM there).
+   * @param cookiesPath Optional path to a Netscape cookies file passed to yt-dlp.
+   */
+  constructor(essentiaInstance, cookiesPath) {
+    this.cookiesPath = cookiesPath;
+    this.name = "essentia";
+    this._essentia = null;
+    this._injected = essentiaInstance ?? null;
+  }
+  async getEssentia() {
+    if (this._injected) return this._injected;
+    if (this._essentia) return this._essentia;
+    const mod = await import("essentia.js");
+    const EssentiaWASM = mod.EssentiaWASM ?? mod.default?.EssentiaWASM;
+    const Essentia = mod.Essentia ?? mod.default?.Essentia;
+    if (!Essentia || !EssentiaWASM) {
+      throw new Error("essentia.js loaded but EssentiaWASM/Essentia exports are missing");
+    }
+    this._essentia = new Essentia(EssentiaWASM);
+    return this._essentia;
+  }
+  /**
+   * Analyse the given audio buffer and return an `Analysis`.
+   *
+   * The `audio` parameter must be mono Float32 PCM at 44 100 Hz encoded as f32le.
+   * If you pass raw bytes from yt-dlp/ffmpeg, this is already the case when
+   * ffmpeg is invoked with `-ac 1 -ar 44100 -f f32le`.
+   *
+   * When `audio` is empty (length 0) the method falls back to fetching audio
+   * directly via yt-dlp + ffmpeg using `videoId` — this is the primary path
+   * used by the integration layer and integration tests.
+   */
+  async analyze(videoId, audio) {
+    const essentia = await this.getEssentia();
+    let float32;
+    let durationSec;
+    if (audio.length === 0) {
+      const fetched = await fetchPCM(videoId, this.cookiesPath);
+      float32 = fetched.float32;
+      durationSec = fetched.durationSec;
+    } else {
+      const nSamples = audio.byteLength / 4;
+      float32 = new Float32Array(nSamples);
+      const dv = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
+      for (let i = 0; i < nSamples; i++) {
+        float32[i] = dv.getFloat32(
+          i * 4,
+          /* littleEndian= */
+          true
+        );
+      }
+      durationSec = nSamples / SAMPLE_RATE;
+    }
+    let signalVec = null;
+    try {
+      signalVec = essentia.arrayToVector(float32);
+      const tempo = this._extractTempo(essentia, signalVec);
+      const onsets = this._extractOnsets(essentia, signalVec);
+      const key = this._extractKey(essentia, signalVec);
+      const energy = this._extractEnergy(essentia, signalVec, float32);
+      const raw = {
+        videoId,
+        duration: durationSec,
+        tempo,
+        onsets,
+        key,
+        energy,
+        sections: null,
+        analyzedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      const validated = safeParseAnalysis(raw);
+      if (!validated) {
+        throw new Error(
+          `EssentiaAnalysisProvider: output failed schema validation for videoId=${videoId}. Raw output: ${JSON.stringify({ bpm: raw.tempo.bpm, tonic: raw.key?.tonic, mode: raw.key?.mode })}`
+        );
+      }
+      return validated;
+    } finally {
+      signalVec?.delete();
+    }
+  }
+  // ─── Rhythm extraction ────────────────────────────────────────────────────
+  _extractTempo(essentia, signalVec) {
+    let ticksVec = null;
+    let estimatesVec = null;
+    let bpmIntervalsVec = null;
+    try {
+      const r = essentia.RhythmExtractor2013(signalVec, 208, "multifeature", 40);
+      ticksVec = r.ticks;
+      estimatesVec = r.estimates;
+      bpmIntervalsVec = r.bpmIntervals;
+      const rawBpm = r.bpm;
+      const rawConfidence = r.confidence;
+      const beatGrid = Array.from(essentia.vectorToArray(ticksVec));
+      let bpm = rawBpm;
+      if (rawBpm > 120) {
+        const half = rawBpm / 2;
+        if (half >= 50 && half <= 95) {
+          bpm = half;
+        }
+      }
+      const confidence = Math.min(1, Math.max(0, rawConfidence / 5.32));
+      return { bpm, confidence, beatGrid };
+    } finally {
+      ticksVec?.delete();
+      estimatesVec?.delete();
+      bpmIntervalsVec?.delete();
+    }
+  }
+  // ─── Onset extraction ─────────────────────────────────────────────────────
+  _extractOnsets(essentia, signalVec) {
+    let onsetsVec = null;
+    try {
+      const r = essentia.OnsetRate(signalVec);
+      onsetsVec = r.onsets;
+      return Array.from(essentia.vectorToArray(onsetsVec));
+    } finally {
+      onsetsVec?.delete();
+    }
+  }
+  // ─── Key extraction ───────────────────────────────────────────────────────
+  _extractKey(essentia, signalVec) {
+    try {
+      const r = essentia.KeyExtractor(
+        signalVec,
+        /* averageDetuningCorrection */
+        true,
+        /* frameSize              */
+        4096,
+        /* hopSize                */
+        4096,
+        /* hpcpSize               */
+        36,
+        /* maxFrequency           */
+        5e3,
+        /* maximumSpectralPeaks   */
+        60,
+        /* minFrequency           */
+        25,
+        /* pcpThreshold           */
+        0.2,
+        /* profileType            */
+        "bgate",
+        /* sampleRate             */
+        SAMPLE_RATE,
+        /* spectralPeaksThreshold */
+        1e-4,
+        /* tuningFrequency        */
+        440,
+        /* weightType             */
+        "cosine",
+        /* windowType             */
+        "hann"
+      );
+      const rawTonic = r.key;
+      const tonic = normalizeFlatToSharp(rawTonic);
+      if (!SHARP_TONICS.has(tonic)) return null;
+      const scale = r.scale;
+      const mode = scale === "major" ? "major" : "minor";
+      const tonicTyped = tonic;
+      const camelot = keyToCamelot(tonicTyped, mode);
+      const confidence = r.strength;
+      return { tonic: tonicTyped, mode, camelot, confidence };
+    } catch {
+      return null;
+    }
+  }
+  // ─── Energy extraction ────────────────────────────────────────────────────
+  _extractEnergy(essentia, signalVec, float32) {
+    try {
+      const rmsResult = essentia.RMS(signalVec);
+      const overall = rmsResult.rms;
+      const frameSize = Math.floor(SAMPLE_RATE * 0.5);
+      const nFrames = Math.floor((float32.length - frameSize) / frameSize) + 1;
+      if (nFrames < 1 || float32.length < frameSize) {
+        return { overall };
+      }
+      const envelope = [];
+      for (let fi = 0; fi < nFrames; fi++) {
+        const start = fi * frameSize;
+        const slice = float32.subarray(start, start + frameSize);
+        let frameVec = null;
+        try {
+          frameVec = essentia.arrayToVector(slice);
+          const r = essentia.RMS(frameVec);
+          envelope.push({ t: fi * 0.5, rms: r.rms });
+        } finally {
+          frameVec?.delete();
+        }
+      }
+      return { overall, envelope };
+    } catch {
+      return null;
+    }
+  }
+};
+
 // src/musickit/index.ts
 function makeReq(endpoint) {
   return { method: "GET", endpoint, headers: {}, body: null };
@@ -2286,6 +2714,7 @@ var _MusicKit = class _MusicKit {
     this._podcast = null;
     this._poolPromise = null;
     this._lyrics = null;
+    this._analysisInflight = new InflightMap();
     // Bound so it can be passed by reference to StreamResolver without losing `this`.
     this.onStreamFallback = (videoId, reason) => {
       this.log.debug(`[stream] InnerTube fast-path failed for ${videoId}, falling back to yt-dlp: ${reason}`);
@@ -2350,6 +2779,7 @@ var _MusicKit = class _MusicKit {
     if (!config.identify?.acoustidApiKey) {
       this.log.warn("[MusicKit] identify() is unavailable \u2014 no acoustidApiKey set. Get a free key at acoustid.org and pass it as config.identify.acoustidApiKey.");
     }
+    this._analysisProvider = config.analysis?.provider ?? new EssentiaAnalysisProvider(void 0, config.cookiesPath);
   }
   searchCacheSet(key, value) {
     if (this.searchCache.size >= _MusicKit.SEARCH_CACHE_MAX) {
@@ -2893,6 +3323,44 @@ var _MusicKit = class _MusicKit {
       return this._downloader.streamPCM(resolved);
     }
   }
+  /**
+   * Returns a full audio analysis for the given YouTube `videoId`.
+   *
+   * The analysis includes tempo/BPM, beat grid, onset timestamps, key
+   * detection, and energy envelope. Results are cached for 1 year (analysis
+   * is deterministic per video). Parallel calls with the same videoId share
+   * a single in-flight provider invocation.
+   *
+   *   const analysis = await mk.getAnalysis('dQw4w9WgXcQ')
+   *   console.log(analysis.tempo.bpm)  // 114
+   */
+  async getAnalysis(videoId) {
+    const id = resolveInput(videoId);
+    const cacheKey = `analysis:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      this.emitter.emit("cacheHit", cacheKey, Cache.TTL.ANALYSIS);
+      return cached;
+    }
+    this.emitter.emit("cacheMiss", cacheKey);
+    await this.limiter.throttle("analysis", (ep, waitMs) => this.emitter.emit("rateLimited", ep, waitMs));
+    return this._analysisInflight.get(id, async () => {
+      try {
+        const result = await this.call(
+          "analysis",
+          () => this._analysisProvider.analyze(id, new Uint8Array(0))
+        );
+        this.cache.set(cacheKey, result, Cache.TTL.ANALYSIS);
+        return result;
+      } catch (err) {
+        throw new StreamError(
+          `Analysis failed for videoId=${id}: ${err instanceof Error ? err.message : String(err)}`,
+          id,
+          err
+        );
+      }
+    });
+  }
   async getPodcast(feedUrl) {
     if (!this._podcast) this._podcast = new PodcastClient();
     return this._podcast.getFeed(feedUrl);
@@ -2987,7 +3455,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "4.2.1";
+var version = "4.3.0";
 
 // src/models/index.ts
 var SearchFilter = {
@@ -3030,6 +3498,7 @@ export {
   Cache,
   DiscoveryClient,
   Downloader,
+  EssentiaAnalysisProvider,
   HttpError,
   Identifier,
   KUGOU_LYRICS_BASE,

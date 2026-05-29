@@ -1,0 +1,21 @@
+diff --git a/dist/src/parser/classes/Tab.js b/dist/src/parser/classes/Tab.js
+index 09397426d32e2c5b5b691d6dc0689535d3eec8cb..334660128387bbd598f296ec1a786ec794ac224a 100644
+--- a/dist/src/parser/classes/Tab.js
++++ b/dist/src/parser/classes/Tab.js
+@@ -3,6 +3,7 @@ import NavigationEndpoint from './NavigationEndpoint.js';
+ import SectionList from './SectionList.js';
+ import MusicQueue from './MusicQueue.js';
+ import RichGrid from './RichGrid.js';
++import Message from './Message.js';
+ import { YTNode } from '../helpers.js';
+ export default class Tab extends YTNode {
+     static type = 'Tab';
+@@ -15,7 +16,7 @@ export default class Tab extends YTNode {
+         this.title = data.title || 'N/A';
+         this.selected = !!data.selected;
+         this.endpoint = new NavigationEndpoint(data.endpoint);
+-        this.content = Parser.parseItem(data.content, [SectionList, MusicQueue, RichGrid]);
++        this.content = Parser.parseItem(data.content, [SectionList, MusicQueue, RichGrid, Message]);
+     }
+ }
+ //# sourceMappingURL=Tab.js.map

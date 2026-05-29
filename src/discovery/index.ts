@@ -72,6 +72,27 @@ function mapPlaylistItem(item: any): Playlist {
   }
 }
 
+/**
+ * Dispatcher used by `getHome()` — routes each section item through the
+ * right mapper based on its InnerTube `item_type`. Falls back to the song
+ * mapper for items without a known type so we don't silently drop content.
+ */
+function mapHomeItem(item: any): Song | Album | Artist | Playlist {
+  const type = item?.item_type
+  if (type === 'album') return mapAlbumItem(item)
+  if (type === 'artist') return mapArtistItem(item)
+  if (type === 'playlist') return mapPlaylistItem(item)
+  if (type === 'song') return mapSongItem(item)
+
+  // Fallback heuristic: check ID prefix if type is unknown
+  const id = item.id || item.video_id || ''
+  if (id.startsWith('PL') || id.startsWith('RD') || id.startsWith('VLRD')) {
+    return mapPlaylistItem(item)
+  }
+
+  return mapSongItem(item)
+}
+
 function flatContents(res: any): any[] {
   return (res?.contents ?? []).flatMap((section: any) => section?.contents ?? [])
 }
@@ -158,7 +179,7 @@ export class DiscoveryClient {
     return (res?.sections ?? res?.contents ?? [])
       .map((s: any) => ({
         title: extractText(s.title) || extractText(s.header?.title) || '',
-        items: (s.contents ?? []).map(mapSongItem),
+        items: (s.contents ?? []).map(mapHomeItem),
       }))
       .filter((s: Section) => !isEmptySection(s.title, s.items))
   }

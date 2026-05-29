@@ -9,7 +9,10 @@ export const ThumbnailSchema = z.object({
 
 export const SongSchema = z.object({
   type: z.literal('song'),
-  videoId: z.string().min(1),
+  videoId: z.string().min(1).refine(
+    (id) => id.length === 11 && !id.startsWith('PL') && !id.startsWith('RD'),
+    { message: 'Invalid videoId: must be 11 chars and not a playlist/radio ID' },
+  ),
   title: z.string().min(1),
   artist: z.string().min(1),
   duration: z.number(),

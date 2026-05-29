@@ -254,10 +254,11 @@ var HttpError = class extends Error {
 var RetryEngine = class {
   constructor(config) {
     this.config = {
+      maxAttempts: config.maxAttempts,
+      backoffBase: config.backoffBase,
       backoffMax: config.backoffMax ?? 6e4,
       onRetry: config.onRetry ?? (() => {
-      }),
-      ...config
+      })
     };
   }
   async execute(fn, _endpoint, options = {}) {
@@ -406,7 +407,10 @@ var ThumbnailSchema = import_zod.z.object({
 });
 var SongSchema = import_zod.z.object({
   type: import_zod.z.literal("song"),
-  videoId: import_zod.z.string().min(1),
+  videoId: import_zod.z.string().min(1).refine(
+    (id) => id.length === 11 && !id.startsWith("PL") && !id.startsWith("RD"),
+    { message: "Invalid videoId: must be 11 chars and not a playlist/radio ID" }
+  ),
   title: import_zod.z.string().min(1),
   artist: import_zod.z.string().min(1),
   duration: import_zod.z.number(),
@@ -517,17 +521,16 @@ function mapPlaylistItem(item) {
   };
 }
 function mapHomeItem(item) {
-  switch (item?.item_type) {
-    case "album":
-      return mapAlbumItem(item);
-    case "artist":
-      return mapArtistItem(item);
-    case "playlist":
-      return mapPlaylistItem(item);
-    case "song":
-    default:
-      return mapSongItem(item);
+  const type = item?.item_type;
+  if (type === "album") return mapAlbumItem(item);
+  if (type === "artist") return mapArtistItem(item);
+  if (type === "playlist") return mapPlaylistItem(item);
+  if (type === "song") return mapSongItem(item);
+  const id = item.id || item.video_id || "";
+  if (id.startsWith("PL") || id.startsWith("RD") || id.startsWith("VLRD")) {
+    return mapPlaylistItem(item);
   }
+  return mapSongItem(item);
 }
 function flatContents(res) {
   return (res?.contents ?? []).flatMap((section) => section?.contents ?? []);

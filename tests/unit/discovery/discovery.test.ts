@@ -390,6 +390,123 @@ describe('DiscoveryClient', () => {
     })
   })
 
+  describe('getHome (item type dispatch)', () => {
+    // The home feed contains heterogeneous items — songs, albums, artists,
+    // playlists. Each must round-trip through the right mapper so its
+    // public shape (videoId vs browseId vs channelId vs playlistId) +
+    // thumbnails are correct. Forcing everything through mapSongItem
+    // (the pre-fix behavior) collapsed every non-song item to a Song
+    // with empty videoId + 'Unknown Artist' + missing thumbnails — that
+    // showed up downstream as cassette placeholders + Unknown Artist
+    // labels on the desktop client's Dashboard.
+
+    it('maps a song item as a Song with videoId + thumbnails', async () => {
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          { title: { text: 'Quick picks' }, contents: [makeSongItem()] },
+        ],
+      })
+
+      const [section] = await client.getHome()
+      const item = section.items[0] as any
+
+      expect(item.type).toBe('song')
+      expect(item.videoId).toBe('dQw4w9WgXcQ')
+      expect(item.artist).toBe('Rick Astley')
+      expect(item.thumbnails[0]?.url).toBe('https://img.example.com/thumb.jpg')
+    })
+
+    it('maps an album item as an Album with browseId + thumbnails', async () => {
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          { title: { text: 'New releases' }, contents: [makeAlbumItem()] },
+        ],
+      })
+
+      const [section] = await client.getHome()
+      const item = section.items[0] as any
+
+      expect(item.type).toBe('album')
+      expect(item.browseId).toBe('MPREb_4pL8gzRtw1v')
+      expect(item.title).toBe('A Night at the Opera')
+      expect(item.thumbnails[0]?.url).toBe('https://img.example.com/album.jpg')
+    })
+
+    it('maps an artist item as an Artist with channelId + thumbnails', async () => {
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          { title: { text: 'Top artists' }, contents: [makeArtistItem()] },
+        ],
+      })
+
+      const [section] = await client.getHome()
+      const item = section.items[0] as any
+
+      expect(item.type).toBe('artist')
+      expect(item.channelId).toBe('UCiMhD4jzUqG-IgPzUmmytRQ')
+      expect(item.name).toBe('Queen')
+      expect(item.thumbnails[0]?.url).toBe('https://img.example.com/artist.jpg')
+    })
+
+    it('maps a playlist item as a Playlist with playlistId + thumbnails', async () => {
+      const playlistItem = {
+        id: 'PL_band_baaja_baraat',
+        title: 'Band Baaja Baraat',
+        item_type: 'playlist',
+        thumbnail: {
+          contents: [
+            { url: 'https://img.example.com/playlist.jpg', width: 226, height: 226 },
+          ],
+        },
+      }
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          { title: { text: 'Top playlists' }, contents: [playlistItem] },
+        ],
+      })
+
+      const [section] = await client.getHome()
+      const item = section.items[0] as any
+
+      expect(item.type).toBe('playlist')
+      expect(item.playlistId).toBe('PL_band_baaja_baraat')
+      expect(item.title).toBe('Band Baaja Baraat')
+      expect(item.thumbnails[0]?.url).toBe('https://img.example.com/playlist.jpg')
+    })
+
+    it('handles a mixed-type section — each item gets the right shape', async () => {
+      const playlistItem = {
+        id: 'PL_mixed',
+        title: 'A Playlist',
+        item_type: 'playlist',
+        thumbnail: {
+          contents: [{ url: 'https://img.example.com/pl.jpg', width: 226, height: 226 }],
+        },
+      }
+      mockYt.music.getHomeFeed.mockResolvedValue({
+        sections: [
+          {
+            title: { text: 'Mixed' },
+            contents: [
+              makeSongItem({ id: 'song1' }),
+              makeAlbumItem({ id: 'MPREb_a' }),
+              makeArtistItem({ id: 'UC_xxx' }),
+              playlistItem,
+            ],
+          },
+        ],
+      })
+
+      const [section] = await client.getHome()
+      expect(section.items.map((i: any) => i.type)).toEqual([
+        'song',
+        'album',
+        'artist',
+        'playlist',
+      ])
+    })
+  })
+
   describe('getAlbum (artist propagation + subtitle parsing)', () => {
     it('propagates album artist to tracks that have no individual artist field', async () => {
       mockYt.music.getAlbum.mockResolvedValue({

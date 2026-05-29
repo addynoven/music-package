@@ -35,9 +35,10 @@ export class RetryEngine {
 
   constructor(config: RetryEngineConfig) {
     this.config = {
+      maxAttempts: config.maxAttempts,
+      backoffBase: config.backoffBase,
       backoffMax: config.backoffMax ?? 60_000,
       onRetry: config.onRetry ?? (() => {}),
-      ...config,
     }
   }
 

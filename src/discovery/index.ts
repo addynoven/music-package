@@ -15,7 +15,10 @@ function extractText(value: any): string {
 }
 
 function mapThumbnails(item: any): Thumbnail[] {
-  return (item?.thumbnail?.contents ?? item?.thumbnails ?? []).map((t: any) => ({
+  const thumbs = Array.isArray(item?.thumbnail) 
+    ? item.thumbnail 
+    : (item?.thumbnail?.contents ?? item?.thumbnails ?? []);
+  return thumbs.map((t: any) => ({
     url: t.url ?? '',
     width: t.width ?? 0,
     height: t.height ?? 0,

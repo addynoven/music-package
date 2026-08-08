@@ -375,7 +375,8 @@ function extractText(value) {
   return "";
 }
 function mapThumbnails(item) {
-  return (item?.thumbnail?.contents ?? item?.thumbnails ?? []).map((t) => ({
+  const thumbs = Array.isArray(item?.thumbnail) ? item.thumbnail : item?.thumbnail?.contents ?? item?.thumbnails ?? [];
+  return thumbs.map((t) => ({
     url: t.url ?? "",
     width: t.width ?? 0,
     height: t.height ?? 0
@@ -3458,7 +3459,7 @@ var Queue = class {
 };
 
 // package.json
-var version = "4.3.1";
+var version = "4.4.0";
 
 // src/models/index.ts
 var SearchFilter = {

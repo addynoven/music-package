@@ -158,7 +158,7 @@ describe('DiscoveryClient', () => {
     })
 
     it('falls back to Unknown Artist when item has neither artists nor author', async () => {
-      const bareItem = { id: 'xyz', title: 'Title', duration: { seconds: 100 }, item_type: 'song', thumbnail: {} }
+      const bareItem = { id: 'xyz12345678', title: 'Title', duration: { seconds: 100 }, item_type: 'song', thumbnail: {} }
       mockYt.music.search.mockResolvedValue({ contents: [{ contents: [bareItem] }] })
 
       const results = await client.search('test') as any

@@ -159,7 +159,7 @@ describe('PlaylistSchema', () => {
 
 describe('safeParseSong', () => {
   it('returns the song when valid', () => {
-    const song = { type: 'song' as const, videoId: 'abc123', title: 'Test', artist: 'Artist', duration: 0, thumbnails: [] }
+    const song = { type: 'song' as const, videoId: 'abc12345678', title: 'Test', artist: 'Artist', duration: 0, thumbnails: [] }
     expect(safeParseSong(song)).toEqual(song)
   })
 
